@@ -67,7 +67,7 @@ resource "aws_lb" "web" {
   name               = "vortex-frota-alb"
   load_balancer_type = "application"
   subnets            = local.eligible_subnet_ids
-  security_groups    = [aws_security_group.allow-ssh.id]
+  security_groups    = [aws_security_group.web.id]
 }
 
 # O target group agrupa os alvos (as EC2) e define como verificar a saude deles.
@@ -107,29 +107,70 @@ resource "aws_instance" "web" {
   instance_type          = var.instance_type
   ami                    = data.aws_ami.amazon_linux.id
   subnet_id              = element(local.eligible_subnet_ids, count.index)
-  vpc_security_group_ids = [aws_security_group.allow-ssh.id]
-  key_name               = var.key_name
-
-  provisioner "file" {
-    source      = "script.sh"
-    destination = "/tmp/script.sh"
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "chmod +x /tmp/script.sh",
-      "sudo /tmp/script.sh",
-    ]
-  }
-
-  connection {
-    user        = var.instance_username
-    private_key = file(var.path_to_key)
-    host        = self.public_dns
-  }
+  vpc_security_group_ids = [aws_security_group.web.id]
+  iam_instance_profile   = "LabInstanceProfile"
 
   tags = {
     Name = format("nginx-%03d", count.index + 1)
+  }
+}
+
+# Provisiona cada servidor da frota via SSM (sem SSH, sem chave). Um terraform_data
+# por instancia: envia o script.sh, espera terminar e ABORTA o apply se falhar —
+# mesma garantia do provisioner SSH. Exige aws CLI + jq (ver pre-requisitos do lab).
+resource "terraform_data" "provisiona" {
+  count = length(aws_instance.web)
+
+  triggers_replace = {
+    instance_id = aws_instance.web[count.index].id
+    script_hash = filesha256("${path.module}/script.sh")
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["bash", "-c"]
+    command     = <<-EOT
+      set -euo pipefail
+      ID="${aws_instance.web[count.index].id}"
+      REGION="${var.aws_region}"
+
+      echo "Aguardando a instancia $ID ficar online no SSM..."
+      for i in $(seq 1 30); do
+        PING=$(aws ssm describe-instance-information \
+          --filters "Key=InstanceIds,Values=$ID" --region "$REGION" \
+          --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null || true)
+        [ "$PING" = "Online" ] && break
+        sleep 10
+      done
+      if [ "$PING" != "Online" ]; then
+        echo "ERRO: a instancia $ID nao ficou online no SSM a tempo." >&2
+        exit 1
+      fi
+
+      echo "Provisionando $ID via SSM..."
+      COMMANDS_JSON=$(jq -R . "${path.module}/script.sh" | jq -s .)
+      CMD=$(aws ssm send-command \
+        --instance-ids "$ID" \
+        --document-name "AWS-RunShellScript" \
+        --comment "Provisionamento frota Vortex (01.3)" \
+        --parameters "commands=$COMMANDS_JSON" \
+        --region "$REGION" \
+        --query 'Command.CommandId' --output text)
+
+      aws ssm wait command-executed --command-id "$CMD" --instance-id "$ID" --region "$REGION" || true
+
+      echo "----- log de $ID -----"
+      aws ssm get-command-invocation --command-id "$CMD" --instance-id "$ID" \
+        --region "$REGION" --query 'StandardOutputContent' --output text
+      echo "----------------------"
+
+      STATUS=$(aws ssm get-command-invocation --command-id "$CMD" --instance-id "$ID" --region "$REGION" --query 'Status' --output text)
+      if [ "$STATUS" != "Success" ]; then
+        echo "ERRO: provisionamento de $ID falhou (Status=$STATUS)." >&2
+        aws ssm get-command-invocation --command-id "$CMD" --instance-id "$ID" \
+          --region "$REGION" --query 'StandardErrorContent' --output text >&2
+        exit 1
+      fi
+    EOT
   }
 }
 

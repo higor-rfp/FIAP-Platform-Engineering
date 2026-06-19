@@ -25,29 +25,80 @@ resource "aws_instance" "example" {
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = "t2.micro"
   iam_instance_profile   = "LabInstanceProfile"
-  key_name               = var.key_name
   vpc_security_group_ids = [aws_security_group.gitlab-runner-fleet.id]
   subnet_id              = random_shuffle.random_subnet.result[0]
 
-  provisioner "file" {
-    source      = "install-python.sh"
-    destination = "/tmp/install-python.sh"
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "chmod +x /tmp/install-python.sh",
-      "sudo /tmp/install-python.sh",
-    ]
-  }
-
-  connection {
-    user        = var.instance_username
-    private_key = file(var.path_to_key)
-    host        = self.public_ip
-  }
+  # Sem key_name: nao ha mais SSH. Tanto o BOOTSTRAP (abaixo) quanto o proprio
+  # Ansible (mais adiante no lab) acessam esta maquina via AWS Systems Manager
+  # (SSM), usando o LabInstanceProfile. Sem chave, sem porta 22.
 
   tags = {
     Name = format("gitlab-runner-fleet-%03d", count.index + 1)
+  }
+}
+
+# Bootstrap via SSM: prepara a maquina (Python, pip, awscli) para o Ansible poder
+# operar nela. Envia o install-python.sh, espera terminar e ABORTA o apply se
+# falhar. Sem isso, o Ansible nao conseguiria executar os modulos Python no host.
+# Exige aws CLI + jq (ver pre-requisitos do lab).
+resource "terraform_data" "bootstrap" {
+  triggers_replace = {
+    instance_id = aws_instance.example[0].id
+    script_hash = filesha256("${path.module}/install-python.sh")
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["bash", "-c"]
+    command     = <<-EOT
+      set -euo pipefail
+      ID="${aws_instance.example[0].id}"
+      REGION="${var.aws_region}"
+
+      echo "Aguardando a instancia $ID ficar online no SSM..."
+      for i in $(seq 1 30); do
+        PING=$(aws ssm describe-instance-information \
+          --filters "Key=InstanceIds,Values=$ID" --region "$REGION" \
+          --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null || true)
+        [ "$PING" = "Online" ] && break
+        sleep 10
+      done
+      if [ "$PING" != "Online" ]; then
+        echo "ERRO: a instancia $ID nao ficou online no SSM a tempo." >&2
+        exit 1
+      fi
+
+      echo "Executando o bootstrap (install-python) via SSM em $ID..."
+      COMMANDS_JSON=$(jq -R . "${path.module}/install-python.sh" | jq -s .)
+      CMD=$(aws ssm send-command \
+        --instance-ids "$ID" \
+        --document-name "AWS-RunShellScript" \
+        --comment "Bootstrap do GitLab Runner (02-Ansible)" \
+        --parameters "commands=$COMMANDS_JSON" \
+        --region "$REGION" \
+        --query 'Command.CommandId' --output text)
+
+      # O bootstrap e demorado (apt update/upgrade + instalacoes). O waiter padrao
+      # do SSM expira em ~100s, entao fazemos polling proprio ate sair de Pending/
+      # InProgress (ate ~10 min).
+      STATUS="Pending"
+      for i in $(seq 1 60); do
+        STATUS=$(aws ssm get-command-invocation --command-id "$CMD" --instance-id "$ID" --region "$REGION" --query 'Status' --output text 2>/dev/null || echo "Pending")
+        case "$STATUS" in
+          Pending|InProgress|Delayed) sleep 10 ;;
+          *) break ;;
+        esac
+      done
+
+      echo "----- log do bootstrap -----"
+      aws ssm get-command-invocation --command-id "$CMD" --instance-id "$ID" \
+        --region "$REGION" --query 'StandardOutputContent' --output text | tail -20
+      echo "----------------------------"
+      if [ "$STATUS" != "Success" ]; then
+        echo "ERRO: o bootstrap via SSM falhou (Status=$STATUS)." >&2
+        aws ssm get-command-invocation --command-id "$CMD" --instance-id "$ID" \
+          --region "$REGION" --query 'StandardErrorContent' --output text >&2
+        exit 1
+      fi
+    EOT
   }
 }

@@ -9,14 +9,15 @@
 
 Esse laboratório é o que vamos fazer juntos durante a aula: provisionar uma EC2 com Terraform, conectar essa máquina ao Ansible e rodar um playbook que a transforma num **GitLab Runner registrado** e dedicado a um projeto. No final, você terá feito tudo o que Helena precisava para parar de configurar servidor na mão.
 
-> Os comandos deste lab rodam em **dois lugares**: o **terminal do Codespaces** (onde estão Terraform, Ansible e a chave SSH) e o **console web do GitLab** (onde você cria o projeto e gera o token). Cada passo indica onde executar.
+> Os comandos deste lab rodam em **dois lugares**: o **terminal do Codespaces** (onde estão Terraform e Ansible) e o **console web do GitLab** (onde você cria o projeto e gera o token). Cada passo indica onde executar. A chave SSH que você vai gerar serve **só** para autenticar o `git push` no GitLab — o acesso à EC2 do runner é feito via AWS Systems Manager (SSM), sem chave e sem porta 22.
 
 > [!WARNING]
 > **Pré-requisitos obrigatórios antes de começar:**
 >
 > - [ ] **Módulo 01 (Terraform) concluído** — você entende `init/plan/apply` e state remoto no S3
-> - [ ] Bucket de state remoto existe no S3 (`base-config-<SEU-RM>`, criado no [setup inicial](../../00-create-codespaces/README.md))
-> - [ ] Credenciais AWS do Academy atualizadas no Codespaces
+> - [ ] Bucket de state remoto existe no S3 (`base-config-<SEU-RM>`, criado no [setup inicial](../../00-create-codespaces/README.md)) — este mesmo bucket é reutilizado pelo Ansible-via-SSM para transferir arquivos
+> - [ ] Credenciais AWS do Academy atualizadas no Codespaces (o acesso à EC2 é via SSM, então as credenciais AWS no ambiente são o que autentica a conexão)
+> - [ ] Ferramentas do Ansible-via-SSM instaladas no Codespaces (`session-manager-plugin`, `boto3`, collection `community.aws`) — você instala no **passo 3** mais abaixo
 > - [ ] Conta no [GitLab](https://gitlab.com/) (gratuita)
 >
 > **Valide rapidamente:**
@@ -36,10 +37,11 @@ Vamos separar com clareza **quem faz o quê**: o **Terraform** cria a EC2 e prep
 ## Principais pontos de aprendizagem
 
 - instalar e usar Ansible a partir de um ambiente isolado (virtualenv)
-- gerar e registrar uma chave SSH para autenticar no GitLab
+- preparar o Codespaces para conectar via SSM (`session-manager-plugin`, `boto3`, collection `community.aws`)
+- gerar e registrar uma chave SSH para autenticar o `git push` no GitLab
 - criar um projeto no GitLab e gerar um token de registro de runner
 - provisionar a EC2 do runner com Terraform usando state remoto no S3
-- conectar o Ansible ao host criado via inventário (`hosts`)
+- conectar o Ansible ao host criado via inventário (`hosts`), usando o connection plugin `community.aws.aws_ssm` (sem chave SSH, sem porta 22)
 - rodar um playbook que instala, configura e **registra** o GitLab Runner
 - destruir a infraestrutura ao final para não deixar custo ligado
 
@@ -55,7 +57,7 @@ Ao final deste laboratório, você terá uma EC2 rodando como **GitLab Runner re
 | Parte | O que você faz | Passos | Tempo |
 |-------|----------------|--------|-------|
 | [Parte 1](#parte-1---preparando-o-ambiente) | Atualizar o repositório e entrar na pasta | [1](#passo-1) · [2](#passo-2) | ~3 min |
-| [Parte 2](#parte-2---instalando-ansible-python-e-virtualenv) | Instalar Python, Ansible e virtualenv | [3](#passo-3) (3.1·3.2·3.3·3.4·3.5) | ~10 min |
+| [Parte 2](#parte-2---instalando-ansible-python-e-virtualenv) | Instalar Python, Ansible, virtualenv e as ferramentas de SSM | [3](#passo-3) (3.1·3.2·3.3·3.4·3.5·3.6) | ~12 min |
 | [Parte 3](#parte-3---configurando-o-acesso-ao-gitlab) | Conta GitLab e chave SSH | [4](#passo-4) · [5](#passo-5) (5.1–5.6) | ~10 min |
 | [Parte 4](#parte-4---criando-o-primeiro-projeto-no-gitlab) | Criar o projeto e subir o código | [6](#passo-6) · [7](#passo-7) · [8](#passo-8) · [9](#passo-9) (9.1–9.6) | ~10 min |
 | [Parte 5](#parte-5---gerando-o-token-do-runner) | Gerar o token e colá-lo no playbook | [10](#passo-10) · [11](#passo-11) · [12](#passo-12) · [13](#passo-13) · [14](#passo-14) · [15](#passo-15) · [16](#passo-16) | ~10 min |
@@ -74,7 +76,7 @@ Um **GitLab Runner** é o processo que efetivamente **executa** os jobs de um pi
 
 O runner é só um programa, mas para funcionar ele precisa de um servidor configurado: o pacote `gitlab-runner` instalado, o Terraform disponível (porque os jobs vão rodar Terraform), um serviço `systemd` ativo e o runner **registrado** no projeto via um token. Fazer isso na mão é o "documento de 30 passos" que a Helena reclamou.
 
-É aí que entra o **Ansible**: em vez de um humano seguir um wiki, descrevemos o estado desejado da máquina em arquivos YAML (os *playbooks* e *tasks*) e o Ansible aplica esse estado via SSH, de forma **idempotente** — rodar de novo não duplica nada. O Terraform cria a máquina; o Ansible a configura. Essa separação "provisionar vs. configurar" é um dos padrões mais importantes de plataforma.
+É aí que entra o **Ansible**: em vez de um humano seguir um wiki, descrevemos o estado desejado da máquina em arquivos YAML (os *playbooks* e *tasks*) e o Ansible aplica esse estado de forma **idempotente** — rodar de novo não duplica nada. Neste lab o Ansible não conecta por SSH: usa o connection plugin `community.aws.aws_ssm`, que fala com a EC2 através do AWS Systems Manager (sem chave, sem porta 22). O Terraform cria a máquina; o Ansible a configura. Essa separação "provisionar vs. configurar" é um dos padrões mais importantes de plataforma.
 
 Documentação oficial:
 - [GitLab Runner](https://docs.gitlab.com/runner/)
@@ -89,8 +91,8 @@ A Vortex está montando seu pipeline de entrega contínua. O passo de hoje é te
 
 ```mermaid
 flowchart LR
-    TF[Terraform<br/>cria a EC2] --> EC2[(EC2 nua<br/>Ubuntu)]
-    EC2 --> ANS[Ansible<br/>configura via SSH]
+    TF[Terraform<br/>cria a EC2 + bootstrap via SSM] --> EC2[(EC2 nua<br/>Ubuntu)]
+    EC2 --> ANS[Ansible<br/>configura via SSM]
     ANS --> RUN[GitLab Runner<br/>registrado e online]
     GL[GitLab<br/>token do projeto] -.fornece token.-> ANS
     RUN -.aparece no painel.-> GL
@@ -139,7 +141,7 @@ cd /workspaces/FIAP-Platform-Engineering/02-Ansible/01-provisionando-gitlab-runn
 
 ### Resultado esperado desta parte
 
-Ao final desta etapa, você terá Python atualizado, Ansible instalado e um virtualenv ativo no terminal do Codespaces.
+Ao final desta etapa, você terá Python atualizado, Ansible instalado, um virtualenv ativo e as ferramentas de conexão via SSM (`session-manager-plugin`, `boto3`, collection `community.aws`) prontas no terminal do Codespaces.
 
 Esta parte é um único bloco grande no roteiro antigo. Vamos quebrá-la em sub-passos, cada um com uma validação rápida, para que — se algo falhar — você saiba exatamente onde travou.
 
@@ -240,11 +242,56 @@ Documentação oficial:
 </blockquote>
 </details>
 
+**3.6.** Instale as ferramentas que o Ansible vai precisar para conectar na EC2 via **SSM** (sem chave SSH). Com o `(venv)` ativo, rode tudo de uma vez:
+
+```bash
+# AWS CLI e jq
+command -v aws >/dev/null && command -v jq >/dev/null || sudo apt-get install -y jq
+# session-manager-plugin (necessário para o plugin aws_ssm do Ansible)
+command -v session-manager-plugin >/dev/null || {
+  curl "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" -o /tmp/smp.deb
+  sudo dpkg -i /tmp/smp.deb
+}
+# libs python e a collection do Ansible
+pip install boto3 botocore
+ansible-galaxy collection install community.aws
+```
+
+Confirme que o plugin do SSM ficou disponível:
+
+```bash
+session-manager-plugin --version
+```
+
+Deve imprimir um número de versão.
+
+<details>
+<summary><b>💡 Clique para entender: por que estas ferramentas</b></summary>
+<blockquote>
+
+Neste lab o Ansible não acessa a EC2 por SSH — ele usa o connection plugin `community.aws.aws_ssm`, que conversa com a máquina através do **AWS Systems Manager**. Para isso funcionar, o Codespaces precisa de quatro peças:
+
+- **`aws` CLI e `jq`** — o devcontainer já instala estas duas; o comando acima só garante que `jq` existe (é usado pelo bootstrap do Terraform também).
+- **`session-manager-plugin`** — é o binário que o plugin `aws_ssm` chama por baixo para abrir a sessão SSM. Não vem no devcontainer; é específico deste lab.
+- **`boto3` / `botocore`** — SDK Python da AWS que o plugin `aws_ssm` usa para falar com a API do SSM e com o bucket S3.
+- **collection `community.aws`** — onde vive o próprio connection plugin `aws_ssm`. Sem ela, o `ansible_connection=community.aws.aws_ssm` do inventário não resolve.
+
+Tudo isso é redundante de propósito: se você pulou algum lab anterior, os comandos com `command -v ... ||` só instalam o que faltar.
+
+Documentação oficial:
+- [community.aws.aws_ssm connection plugin](https://docs.ansible.com/ansible/latest/collections/community/aws/aws_ssm_connection.html)
+- [Install the Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
+
+</blockquote>
+</details>
+
 ### Checkpoint
 
 - `python --version` responde 3.8.x
 - `ansible --version` responde sem erro
 - o prompt mostra `(venv)`
+- `session-manager-plugin --version` responde sem erro
+- `ansible-galaxy collection list community.aws` lista a collection instalada
 
 ---
 
@@ -506,7 +553,7 @@ A linha 48 deve ficar assim (com o seu token real no lugar do placeholder):
 
 ### Resultado esperado desta parte
 
-Ao final desta etapa, você terá uma EC2 provisionada e com o IP público em mãos para o Ansible.
+Ao final desta etapa, você terá uma EC2 provisionada (já com Python/pip/awscli instalados pelo bootstrap via SSM) e o **instance id** dela em mãos para o inventário do Ansible.
 
 ---
 
@@ -582,24 +629,29 @@ terraform plan
 
 <a id="passo-21"></a>
 
-**21.** Provisione a máquina que será o runner. Esse apply, além de criar a EC2, roda um script de bootstrap (`install-python.sh`) na máquina para preparar tudo o que o Ansible vai precisar:
+**21.** Provisione a máquina que será o runner. Esse apply, além de criar a EC2, roda um script de bootstrap (`install-python.sh`) na máquina — **via SSM**, não SSH — para preparar tudo o que o Ansible vai precisar (Python, pip, awscli):
 
 ```bash
 terraform apply -auto-approve
 ```
 
+> [!NOTE]
+> O apply fica um tempo em "Aguardando a instancia ficar online no SSM..." e depois mostra o log do bootstrap. Isso é esperado: o Terraform espera o SSM Agent reportar `Online`, manda o `install-python.sh` por `aws ssm send-command` e só conclui o apply quando o script termina com sucesso (se falhar, o apply aborta).
+
 <details>
-<summary><b>💡 Clique para entender: por que Terraform e Ansible juntos</b></summary>
+<summary><b>💡 Clique para entender: por que Terraform e Ansible juntos (e tudo via SSM)</b></summary>
 <blockquote>
 
-Repare na divisão de responsabilidades: o Terraform **cria** a EC2 (recurso de infraestrutura) e ainda roda um `install-python.sh` mínimo via *provisioner* só para garantir que o Python existe — porque o Ansible precisa de Python no host de destino para funcionar.
+Repare na divisão de responsabilidades: o Terraform **cria** a EC2 (recurso de infraestrutura) e ainda roda um `install-python.sh` mínimo só para garantir que o Python existe — porque o Ansible precisa de Python no host de destino para funcionar.
 
-A configuração de verdade (instalar `gitlab-runner`, Terraform, ajustar o `systemd`, registrar o runner) fica para o **Ansible**, na próxima parte. Poderíamos fazer tudo no Terraform via provisioners, mas isso é considerado anti-padrão: provisioners são frágeis e não idempotentes. Ansible foi feito exatamente para configuração de servidor.
+A novidade é **como** esse bootstrap chega na máquina: não há SSH nem chave. A EC2 sobe **sem `key_name`** e o Security Group **não abre a porta 22**. Em vez disso, o Terraform usa um `terraform_data` com `local-exec` que (1) espera o SSM Agent da instância reportar `Online`, (2) envia o `install-python.sh` por `aws ssm send-command` e (3) aborta o apply se o script falhar. Quem autentica tudo isso é o `LabInstanceProfile` anexado à EC2 mais as credenciais AWS do seu ambiente — por isso `aws` e `jq` são pré-requisitos (passo 3.6).
+
+A configuração de verdade (instalar `gitlab-runner`, Terraform, ajustar o `systemd`, registrar o runner) fica para o **Ansible**, na próxima parte — que também conecta via SSM (plugin `community.aws.aws_ssm`). Essa separação "provisionar vs. configurar" é um dos padrões mais importantes de plataforma.
 
 A AMI é resolvida dinamicamente por um `data "aws_ami"` (Ubuntu 22.04 mais recente da Canonical) em vez de um ID fixo — assim o lab não quebra quando a AMI antiga é despublicada.
 
 Documentação oficial:
-- [Terraform provisioners (e por que evitar)](https://developer.hashicorp.com/terraform/language/resources/provisioners/syntax)
+- [aws ssm send-command](https://docs.aws.amazon.com/cli/latest/reference/ssm/send-command.html)
 - [data source aws_ami](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ami)
 
 </blockquote>
@@ -609,10 +661,10 @@ Documentação oficial:
 
 <a id="passo-22"></a>
 
-**22.** Copie o IP público da instância — vamos usá-lo no inventário do Ansible:
+**22.** Copie o **instance id** da EC2 (algo como `i-0abc123...`) — vamos usá-lo no inventário do Ansible, já que a conexão é por SSM e não por IP:
 
 ```bash
-terraform output ec2_dns
+terraform output -raw instance_id
 ```
 
 ![](img/gitlab-11.png)
@@ -620,7 +672,8 @@ terraform output ec2_dns
 ### Checkpoint
 
 - o `terraform apply` terminou com `Apply complete!`
-- `terraform output ec2_dns` mostra o IP público da EC2
+- o log do bootstrap via SSM apareceu e terminou com sucesso (sem `ERRO:`)
+- `terraform output -raw instance_id` mostra o id da EC2 (`i-...`)
 
 ---
 
@@ -644,27 +697,45 @@ cd /workspaces/FIAP-Platform-Engineering/02-Ansible/01-provisionando-gitlab-runn
 
 <a id="passo-24"></a>
 
-**24.** Abra o arquivo de **inventário** (`hosts`), onde configuramos quais máquinas o Ansible acessa e como. Substitua `<IP DO SERVER>` pelo IP público da EC2 (passo 22):
+**24.** Abra o arquivo de **inventário** (`hosts`), onde configuramos quais máquinas o Ansible acessa e como. Você vai preencher **dois** valores: o **instance id** da EC2 (passo 22) como host, e o nome do **seu bucket S3** (`base-config-<SEU-RM>`, do setup inicial) que o plugin SSM usa para transferir arquivos:
 
 ```bash
 code hosts
 ```
 
+Deixe o arquivo com este formato (troque pelo seu instance id e pelo seu bucket):
+
+```ini
+[runner]
+i-0abc123def4567890
+
+[all:vars]
+ansible_connection=community.aws.aws_ssm
+ansible_aws_ssm_bucket_name=base-config-12345
+ansible_aws_ssm_region=us-east-1
+ansible_become=true
+```
+
 ![](img/gitlab-12.png)
 
 <details>
-<summary><b>💡 Clique para entender: o inventário do Ansible</b></summary>
+<summary><b>💡 Clique para entender: o inventário do Ansible via SSM</b></summary>
 <blockquote>
 
-O arquivo `hosts` é o **inventário**: ele diz ao Ansible quais máquinas existem e como conectar a elas. No nosso caso:
+O arquivo `hosts` é o **inventário**: ele diz ao Ansible quais máquinas existem e como conectar a elas. Como aqui a conexão é via SSM (não SSH), o conteúdo muda:
 
-- `[runner]` é um **grupo** de hosts; abaixo dele listamos a EC2 com seu `ansible_host` (o IP público).
-- `[all:vars]` define variáveis válidas para todos os hosts — aqui, a chave SSH privada (`ansible_ssh_private_key_file`) que o Ansible usa para entrar na máquina e a elevação de privilégio (`ansible_become`).
+- `[runner]` é um **grupo** de hosts; abaixo dele o host é o **instance id** da EC2 (`i-...`), não um IP. O SSM endereça a máquina pelo id, então não precisamos de DNS nem de IP público.
+- `[all:vars]` define variáveis válidas para todos os hosts:
+  - `ansible_connection=community.aws.aws_ssm` — usa o connection plugin do SSM em vez de SSH. **Não há `ansible_ssh_private_key_file`**: nenhuma chave é usada.
+  - `ansible_aws_ssm_bucket_name` — o plugin SSM copia os arquivos do playbook por um bucket S3 intermediário; reutilizamos o `base-config-<RM>` do setup.
+  - `ansible_aws_ssm_region` — região onde estão a EC2 e o bucket (`us-east-1`).
+  - `ansible_become=true` — elevação de privilégio (vira root para instalar pacotes).
 
-É o equivalente Ansible do "para quais servidores eu aplico essa configuração e com qual credencial". Em ambientes maiores, o inventário pode ser dinâmico (gerado a partir de tags da AWS, por exemplo).
+É o equivalente Ansible do "para quais servidores eu aplico essa configuração e como chego neles". Quem autoriza a conexão são as credenciais AWS do seu ambiente + o `LabInstanceProfile` da EC2 — sem chave, sem porta 22.
 
 Documentação oficial:
 - [Ansible — Inventário](https://docs.ansible.com/ansible/latest/inventory_guide/intro_inventory.html)
+- [community.aws.aws_ssm connection plugin](https://docs.ansible.com/ansible/latest/collections/community/aws/aws_ssm_connection.html)
 
 </blockquote>
 </details>
@@ -673,40 +744,40 @@ Documentação oficial:
 
 <a id="passo-25"></a>
 
-**25.** Execute o playbook que configura a EC2 como GitLab Runner:
+**25.** Execute o playbook que configura a EC2 como GitLab Runner. Como a conexão é via SSM, **não há `-u ubuntu` nem chave privada** — o Ansible usa as credenciais AWS já presentes no seu ambiente:
 
 ```bash
-ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook -u 'ubuntu' -i hosts --extra-vars 'gitlab_runner_name=gitlab-runner-fleet-001' play.yaml
+ansible-playbook -i hosts --extra-vars 'gitlab_runner_name=gitlab-runner-fleet-001' play.yaml
 ```
 
 ![](img/gitlab-14.png)
 
 <details>
-<summary><b>💡 Clique para entender: ANSIBLE_HOST_KEY_CHECKING=False</b></summary>
+<summary><b>💡 Clique para entender: o comando sem chave SSH</b></summary>
 <blockquote>
 
-Quando você conecta via SSH a um host novo pela primeira vez, o SSH pergunta se você confia na *fingerprint* daquela máquina (`Are you sure you want to continue connecting?`). Numa execução automatizada, essa pergunta travaria o playbook esperando um "yes".
+Compare com a versão antiga, que tinha `ANSIBLE_HOST_KEY_CHECKING=False` e `-u ubuntu`: aquilo só fazia sentido quando o Ansible conectava por SSH (desligar a verificação de *fingerprint* e dizer qual usuário SSH usar). Com o connection plugin `community.aws.aws_ssm` nada disso existe — não há fingerprint de SSH para confiar nem usuário SSH para informar.
 
-`ANSIBLE_HOST_KEY_CHECKING=False` desliga essa verificação **só para esta execução**, permitindo que o Ansible conecte sem prompt interativo. É aceitável num lab efêmero; em produção, prefira gerenciar `known_hosts` adequadamente.
-
-Os outros parâmetros: `-u ubuntu` é o usuário SSH, `-i hosts` aponta o inventário, e `--extra-vars` passa o nome do runner para o playbook.
+O que sobra no comando: `-i hosts` aponta o inventário (que já declara a conexão SSM, o instance id e o bucket) e `--extra-vars` passa o nome do runner para o playbook. A autenticação vem das **credenciais AWS no ambiente** (as mesmas que o `aws sts get-caller-identity` valida) somadas ao `LabInstanceProfile` da EC2. O `become` (virar root) está declarado no próprio inventário (`ansible_become=true`).
 
 Documentação oficial:
-- [Ansible — Host key checking](https://docs.ansible.com/ansible/latest/reference_appendices/config.html#host-key-checking)
+- [community.aws.aws_ssm connection plugin](https://docs.ansible.com/ansible/latest/collections/community/aws/aws_ssm_connection.html)
 
 </blockquote>
 </details>
 
 <details>
-<summary><b>⚠ Se der erro: <code>UNREACHABLE</code> / <code>Failed to connect to the host via ssh</code></b></summary>
+<summary><b>⚠ Se der erro: <code>UNREACHABLE</code> / falha ao abrir a sessão SSM</b></summary>
 <blockquote>
 
-O Ansible não conseguiu chegar na EC2. Verifique, na ordem:
+O Ansible não conseguiu chegar na EC2 via SSM. Verifique, na ordem:
 
-1. O **IP no `hosts`** é exatamente o que `terraform output ec2_dns` retornou (passo 22)?
-2. A EC2 terminou de inicializar? Logo após o `apply`, o SSH pode levar ~1 min para aceitar conexões. Aguarde e rode o playbook de novo.
-3. A chave `ansible_ssh_private_key_file` (`/home/vscode/.ssh/vockey.pem`) existe? Confira com `ls -la /home/vscode/.ssh/vockey.pem`.
-4. O Security Group libera a porta 22 (ele libera, por padrão, em `securitygroup.tf`).
+1. O **instance id no `hosts`** é exatamente o que `terraform output -raw instance_id` retornou (passo 22)?
+2. A EC2 já está `Online` no SSM? Logo após o `apply` ela costuma estar (o próprio bootstrap esperou o SSM ficar online), mas confirme com `aws ssm describe-instance-information --filters "Key=InstanceIds,Values=i-SEU-ID" --query 'InstanceInformationList[0].PingStatus'`.
+3. O `session-manager-plugin` está instalado? Confira com `session-manager-plugin --version` (passo 3.6).
+4. A collection `community.aws` e o `boto3` estão instalados no `(venv)` ativo (passo 3.6)?
+5. O `ansible_aws_ssm_bucket_name` no `hosts` é um bucket **seu** e existente (`base-config-<RM>`)?
+6. Suas credenciais AWS estão válidas? Valide com `aws sts get-caller-identity`.
 
 </blockquote>
 </details>
@@ -770,12 +841,12 @@ terraform destroy -auto-approve
 
 Se você chegou até aqui, então já executou:
 
-- instalação de Python, Ansible e virtualenv num ambiente isolado
-- geração de chave SSH e registro no GitLab
+- instalação de Python, Ansible, virtualenv e as ferramentas de SSM num ambiente isolado
+- geração de chave SSH e registro no GitLab (para o `git push`)
 - criação de projeto no GitLab e push do código via SSH
 - geração do token de registro do runner
-- provisionamento da EC2 com Terraform usando state remoto no S3
-- configuração da EC2 como GitLab Runner via playbook Ansible
+- provisionamento da EC2 com Terraform usando state remoto no S3, com bootstrap via SSM
+- configuração da EC2 como GitLab Runner via playbook Ansible, conectando via SSM (sem chave, sem porta 22)
 - destruição da infraestrutura ao final
 
 **Mensagem para Helena**: o runner da Vortex agora sobe por código. O "documento de 30 passos" virou um `terraform apply` seguido de um `ansible-playbook` — qualquer pessoa do time sobe um runner idêntico, e o Ansible garante que rodar de novo não quebra nada. Está pronto para automatizar os deploys no módulo de CI/CD.
@@ -801,13 +872,16 @@ Lá Diego volta com uma demanda: *"Temos o runner. Agora quero que todo push na 
 | **Ansible** | Ferramenta de configuração de servidores. Descreve o estado desejado em YAML (playbooks/tasks) e aplica via SSH, de forma idempotente. |
 | **Playbook** | Arquivo YAML que orquestra uma sequência de tasks Ansible contra um conjunto de hosts. Aqui é o `play.yaml`. |
 | **Task** | Unidade de trabalho do Ansible (instalar pacote, copiar arquivo, rodar comando). As tasks deste lab estão em `tasks/`. |
-| **Inventário (`hosts`)** | Arquivo que lista quais máquinas o Ansible gerencia e como conectar (IP, usuário, chave SSH). |
+| **Inventário (`hosts`)** | Arquivo que lista quais máquinas o Ansible gerencia e como conectar. Aqui: o instance id da EC2 e a conexão via SSM (sem IP, sem chave SSH). |
+| **SSM (AWS Systems Manager)** | Serviço da AWS que permite acessar e rodar comandos numa EC2 sem SSH, sem chave e sem porta 22. O acesso à EC2 do runner (bootstrap do Terraform e conexão do Ansible) é todo via SSM. |
+| **`community.aws.aws_ssm`** | Connection plugin do Ansible que conecta na EC2 através do SSM em vez de SSH. Usa um bucket S3 para transferir arquivos. |
+| **`session-manager-plugin`** | Binário local que o plugin `aws_ssm` usa para abrir a sessão SSM com a EC2. Instalado no passo 3.6. |
 | **Idempotência** | Propriedade de rodar a mesma operação várias vezes sem efeitos colaterais. Aplicar o playbook duas vezes não duplica nada. |
 | **GitLab Runner** | Processo que executa os jobs de um pipeline de CI/CD. Aqui, dedicado a um único projeto. |
 | **Token de registro** | Segredo gerado pelo GitLab que autentica e vincula um runner a um projeto. |
 | **virtualenv** | Ambiente Python isolado, com pacotes próprios, ativado por `source ~/venv/bin/activate`. |
 | **State remoto (S3)** | Arquivo de estado do Terraform guardado num bucket S3, para colaboração sem corromper o estado local. |
-| **Provisioner (Terraform)** | Mecanismo que roda scripts no recurso recém-criado. Usado aqui só para o bootstrap mínimo de Python; configuração de verdade fica no Ansible. |
+| **Bootstrap (Terraform via SSM)** | Etapa em que o Terraform envia o `install-python.sh` para a EC2 por `aws ssm send-command`, garantindo Python/pip/awscli antes do Ansible. Configuração de verdade fica no Ansible. |
 
 </blockquote>
 </details>
@@ -820,7 +894,7 @@ Antes de abrir issue/perguntar, colete estas 4 informações — elas reduzem o 
 
 1. **Em que passo você está** (ex: "passo 25, rodando o `ansible-playbook`")
 2. **Mensagem de erro literal** (copia-cola completo do terminal, não screenshot — texto é pesquisável)
-3. **Saída de** `terraform output ec2_dns` **e do arquivo** `hosts` (mostra o IP que o Ansible está usando)
+3. **Saída de** `terraform output -raw instance_id` **e do arquivo** `hosts` (mostra o instance id que o Ansible está usando)
 4. **O que você já tentou**
 
 Canais (em ordem de prioridade):
@@ -828,7 +902,7 @@ Canais (em ordem de prioridade):
 - **Issues do repositório**: [github.com/vamperst/FIAP-Platform-Engineering/issues](https://github.com/vamperst/FIAP-Platform-Engineering/issues)
 - **E-mail do professor**: `Rafael@rfbarbosa.com`
 - **LinkedIn**: [rafael-barbosa-serverless](https://www.linkedin.com/in/rafael-barbosa-serverless/)
-- **Antes de tudo**: confira se o IP em `hosts` bate com o `terraform output ec2_dns` (~70% dos `UNREACHABLE` são IP desatualizado após um novo `apply`).
+- **Antes de tudo**: confira se o instance id em `hosts` bate com o `terraform output -raw instance_id` e se o `session-manager-plugin` está instalado (passo 3.6) — são as causas mais comuns de `UNREACHABLE` na conexão via SSM.
 
 </blockquote>
 </details>

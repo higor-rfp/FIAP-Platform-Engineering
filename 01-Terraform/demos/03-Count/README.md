@@ -12,9 +12,9 @@ Os comandos `bash` rodam **no terminal do Codespaces**. As verificações são f
 > [!WARNING]
 > **Pré-requisitos obrigatórios antes de começar:**
 >
-> - [ ] [Lab 01.2 — Módulos](../02-Modules/README.md) concluído **por completo** — tanto o `vpc-call` (VPC + subnets) **quanto o `RT-call` (route tables com rota para o Internet Gateway)**. Sem as rotas, os servidores sobem mas ficam sem internet e a instalação via SSH falha por timeout.
+> - [ ] [Lab 01.2 — Módulos](../02-Modules/README.md) concluído **por completo** — tanto o `vpc-call` (VPC + subnets) **quanto o `RT-call` (route tables com rota para o Internet Gateway)**. Sem as rotas, os servidores sobem mas ficam sem internet, não conseguem registrar no SSM e o provisionamento falha.
 > - [ ] Credenciais AWS do Academy atualizadas no Codespaces
-> - [ ] Par de chaves `vockey` em `/home/vscode/.ssh/vockey.pem`
+> - [ ] AWS CLI e `jq` disponíveis (o devcontainer já entrega; o passo 3 valida de novo)
 > - [ ] Você consegue abrir o [painel EC2 → Load Balancers](https://us-east-1.console.aws.amazon.com/ec2/home?region=us-east-1#LoadBalancers:)
 >
 > **Valide rapidamente que a rede do lab anterior existe e tem rota para a internet:**
@@ -49,8 +49,8 @@ Uma frota de servidores web da Vortex atrás de um load balancer, que escala de 
 
 | Parte | O que você faz | Passos | Tempo |
 |-------|----------------|--------|-------|
-| [Parte 1](#parte-1---subindo-a-frota-inicial) | Subindo a frota inicial (count = 2) | [1](#passo-1) · [2](#passo-2) · [3](#passo-3) · [4](#passo-4) · [5](#passo-5) · [6](#passo-6) | ~15 min |
-| [Parte 2](#parte-2---escalando-a-frota) | Escalando a frota (2 → 3 → 1) e destruindo | [7](#passo-7) · [8](#passo-8) · [9](#passo-9) · [10](#passo-10) · [11](#passo-11) · [12](#passo-12) | ~15 min |
+| [Parte 1](#parte-1---subindo-a-frota-inicial) | Subindo a frota inicial (count = 2, provisionada via SSM) | [1](#passo-1) · [2](#passo-2) · [3](#passo-3) · [4](#passo-4) · [5](#passo-5) · [6](#passo-6) · [7](#passo-7) | ~15 min |
+| [Parte 2](#parte-2---escalando-a-frota) | Escalando a frota (2 → 3 → 1) e destruindo | [8](#passo-8) · [9](#passo-9) · [10](#passo-10) · [11](#passo-11) · [12](#passo-12) · [13](#passo-13) | ~15 min |
 
 > [!TIP]
 > Se travou em algum passo, clique no número dele na coluna **Passos**.
@@ -86,7 +86,7 @@ flowchart TD
 
 ### Resultado esperado desta parte
 
-Dois servidores Nginx registrados no target group de um Application Load Balancer, acessíveis pelo DNS do balanceador.
+Dois servidores Nginx registrados no target group de um Application Load Balancer, acessíveis pelo DNS do balanceador. As duas máquinas são provisionadas **via AWS Systems Manager (SSM), em paralelo, sem chave SSH e sem porta 22**.
 
 ---
 
@@ -102,7 +102,21 @@ cd /workspaces/FIAP-Platform-Engineering/01-Terraform/demos/03-Count
 
 <a id="passo-2"></a>
 
-**2.** Inicialize:
+**2.** Garanta as ferramentas do provisionamento. Cada EC2 da frota é provisionada via SSM, o que usa a **AWS CLI** e o **`jq`** na sua própria máquina (o Codespaces) para enviar o `script.sh`. O devcontainer já instala ambos, mas se você começou o lab por aqui (pulou os anteriores), este passo garante:
+
+```bash
+command -v aws >/dev/null || { echo "Instale o AWS CLI"; }
+command -v jq  >/dev/null || sudo apt-get install -y jq
+aws --version && jq --version
+```
+
+Se as duas últimas linhas imprimirem as versões, está pronto. O `script.sh` começa com `set -euo pipefail`, então qualquer falha no servidor propaga o erro e **aborta o `apply`** — mesma garantia de um provisioner SSH.
+
+---
+
+<a id="passo-3"></a>
+
+**3.** Inicialize:
 
 ```bash
 terraform init
@@ -110,13 +124,16 @@ terraform init
 
 ---
 
-<a id="passo-3"></a>
+<a id="passo-4"></a>
 
-**3.** Aplique para criar a frota inicial:
+**4.** Aplique para criar a frota inicial. O Terraform cria as 2 EC2 e dispara o provisionamento das duas **em paralelo** via SSM; o log de cada máquina (a instalação do Nginx) aparece no próprio output do `apply`:
 
 ```bash
 terraform apply -auto-approve
 ```
+
+> [!TIP]
+> Procure no output os blocos `----- log de <instance-id> -----` — um por máquina. É o `StandardOutputContent` que o SSM devolveu de cada servidor, auditável direto no `apply`. Se qualquer um falhar (`Status` diferente de `Success`), o `apply` é abortado.
 
 <details>
 <summary><b>💡 Clique para entender: o código real desta demo</b></summary>
@@ -126,7 +143,7 @@ Esta demo usa um **Application Load Balancer (ALB)** — o load balancer moderno
 
 **`versions.tf`** declara os providers (`aws ~> 6.0` e `http ~> 3.0` — o `http` é usado pelo check block, mais abaixo).
 
-**`variables.tf`** define a região e descobre a AMI dinamicamente (Amazon Linux 2023), além das variáveis da chave SSH:
+**`variables.tf`** define a região e descobre a AMI dinamicamente (Amazon Linux 2023):
 
 ```hcl
 data "aws_ami" "amazon_linux" {
@@ -186,7 +203,7 @@ resource "aws_lb" "web" {
   name               = "vortex-frota-alb"
   load_balancer_type = "application"
   subnets            = local.eligible_subnet_ids
-  security_groups    = [aws_security_group.allow-ssh.id]
+  security_groups    = [aws_security_group.web.id]
 }
 
 # Target group: agrupa os alvos (as EC2) e define como verificar a saude deles.
@@ -218,31 +235,41 @@ resource "aws_lb_listener" "web" {
 }
 
 # A frota. count = 2 cria duas EC2 identicas; mudar esse numero escala a frota.
-# As instancias sao distribuidas entre as subnets elegiveis com element().
+# As instancias sao distribuidas entre as subnets elegiveis com element(). Sem
+# key_name e sem provisioner SSH: o acesso para provisionar e via SSM.
 resource "aws_instance" "web" {
   count = 2
 
   instance_type          = var.instance_type
   ami                    = data.aws_ami.amazon_linux.id
   subnet_id              = element(local.eligible_subnet_ids, count.index)
-  vpc_security_group_ids = [aws_security_group.allow-ssh.id]
-  key_name               = var.key_name
-
-  provisioner "file" {
-    source      = "script.sh"
-    destination = "/tmp/script.sh"
-  }
-  provisioner "remote-exec" {
-    inline = ["chmod +x /tmp/script.sh", "sudo /tmp/script.sh"]
-  }
-  connection {
-    user        = var.instance_username
-    private_key = file(var.path_to_key)
-    host        = self.public_dns
-  }
+  vpc_security_group_ids = [aws_security_group.web.id]
+  iam_instance_profile   = "LabInstanceProfile"
 
   tags = {
     Name = format("nginx-%03d", count.index + 1)
+  }
+}
+
+# Provisiona cada servidor da frota via SSM (sem SSH, sem chave). Como tambem usa
+# count, ha um terraform_data por instancia: cada um envia o script.sh via
+# 'aws ssm send-command', espera terminar e ABORTA o apply se o Status != Success.
+# Por usarem count, os provisionamentos rodam em paralelo.
+resource "terraform_data" "provisiona" {
+  count = length(aws_instance.web)
+
+  triggers_replace = {
+    instance_id = aws_instance.web[count.index].id
+    script_hash = filesha256("${path.module}/script.sh")
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["bash", "-c"]
+    command     = <<-EOT
+      # 1. espera a instancia ficar Online no SSM
+      # 2. envia o script.sh via 'aws ssm send-command' (AWS-RunShellScript)
+      # 3. aguarda terminar, imprime o log e faz exit 1 se Status != Success
+    EOT
   }
 }
 
@@ -262,20 +289,21 @@ Pontos-chave:
 - o ALB não conhece as instâncias diretamente: o **target group attachment** (também com `count`) registra cada `aws_instance.web[count.index].id` no target group — mude o `count` e os attachments acompanham
 - `element(local.eligible_subnet_ids, count.index)` distribui as instâncias entre as subnets elegíveis (AZs distintas), ao contrário de jogar todas numa única subnet
 - `format("nginx-%03d", count.index + 1)` nomeia as máquinas `nginx-001`, `nginx-002`, ...
+- **provisionamento via SSM:** cada EC2 carrega o instance profile `LabInstanceProfile` (que já traz a permissão SSM no Learner Lab), e o `terraform_data.provisiona` (também com `count`) usa a AWS CLI para `aws ssm send-command` o `script.sh` em cada máquina, mostra o log no `apply` e aborta se falhar. Por usarem `count`, os provisionamentos das máquinas rodam **em paralelo**. Sem chave SSH, sem porta 22
 - filtramos as AZs que ofertam o `var.instance_type` (a `us-east-1e`, por exemplo, não tem `t3.micro`), evitando o erro `Unsupported instance type` — e como o ALB exige subnets em **≥ 2 AZs**, usamos **todas** as subnets elegíveis em vez de sortear uma
 
-**`securitygroup.tf`** cria o SG `allow-ssh` liberando 22 e 80. **`script.sh`** instala o Nginx via `dnf` (Amazon Linux 2023). **`outputs.tf`** expõe o DNS do ALB (`alb_public`) e os endereços das instâncias. **`check.tf`** valida, pós-deploy, se o ALB já responde HTTP 200 (ver passo 4).
+**`securitygroup.tf`** cria o SG `aws_security_group.web` (`vortex-frota-http`) liberando **apenas a porta 80** de entrada — não há mais regra de SSH (porta 22), porque o SSM fala de dentro da máquina para fora. **`script.sh`** começa com `set -euo pipefail` e instala o Nginx via `dnf` (Amazon Linux 2023). **`outputs.tf`** expõe o DNS do ALB (`alb_public`) e os endereços das instâncias. **`check.tf`** valida, pós-deploy, se o ALB já responde HTTP 200 (ver passo 5).
 
-Documentação oficial: [aws_lb](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lb) · [aws_lb_target_group](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lb_target_group) · [count](https://developer.hashicorp.com/terraform/language/meta-arguments/count)
+Documentação oficial: [aws_lb](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lb) · [aws_lb_target_group](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lb_target_group) · [count](https://developer.hashicorp.com/terraform/language/meta-arguments/count) · [aws ssm send-command](https://docs.aws.amazon.com/cli/latest/reference/ssm/send-command.html)
 
 </blockquote>
 </details>
 
 ---
 
-<a id="passo-4"></a>
+<a id="passo-5"></a>
 
-**4.** Aguarde alguns minutos para as máquinas ficarem prontas e o `apply` terminar. No [painel do Load Balancer](https://us-east-1.console.aws.amazon.com/ec2/home?region=us-east-1#LoadBalancers:), abra a aba **Target groups** → o target group `vortex-frota-tg` → **Targets**: você verá inicialmente as máquinas em estado **unhealthy** enquanto o ALB faz as verificações de integridade.
+**5.** Aguarde alguns minutos para as máquinas ficarem prontas e o `apply` terminar. No [painel do Load Balancer](https://us-east-1.console.aws.amazon.com/ec2/home?region=us-east-1#LoadBalancers:), abra a aba **Target groups** → o target group `vortex-frota-tg` → **Targets**: você verá inicialmente as máquinas em estado **unhealthy** enquanto o ALB faz as verificações de integridade.
 
 Logo ao final do `apply` o Terraform também roda um **check block** (arquivo `check.tf`) que tenta acessar `http://<dns-do-alb>/` e verificar se respondeu `200`. Como o ALB normalmente ainda está em *warm-up* nesse instante, é **esperado** ver um aviso como:
 
@@ -310,17 +338,17 @@ Documentação oficial: [Health checks de target group](https://docs.aws.amazon.
 
 ---
 
-<a id="passo-5"></a>
+<a id="passo-6"></a>
 
-**5.** Aguarde até que todas as máquinas estejam **healthy** no target group `vortex-frota-tg`.
+**6.** Aguarde até que todas as máquinas estejam **healthy** no target group `vortex-frota-tg`.
 
 ![inservice](images/inservice2.png)
 
 ---
 
-<a id="passo-6"></a>
+<a id="passo-7"></a>
 
-**6.** Copie o DNS do ALB (saída `alb_public` do Terraform no Codespaces) e cole no navegador para testar a stack.
+**7.** Copie o DNS do ALB (saída `alb_public` do Terraform no Codespaces) e cole no navegador para testar a stack.
 
 ![dnsc9](images/dnsc9.png)
 
@@ -344,9 +372,9 @@ Você terá escalado a frota de 2 para 3 e de volta para 1 mudando apenas o `cou
 
 ---
 
-<a id="passo-7"></a>
+<a id="passo-8"></a>
 
-**7.** Abra o `main.tf` e altere o `count` da `aws_instance.web` para `3`:
+**8.** Abra o `main.tf` e altere o `count` da `aws_instance.web` para `3`:
 
 ```bash
 code main.tf
@@ -358,9 +386,9 @@ No bloco `resource "aws_instance" "web"`, troque `count = 2` por `count = 3`.
 
 ---
 
-<a id="passo-8"></a>
+<a id="passo-9"></a>
 
-**8.** Veja o plano: deve haver **2 a adicionar** — a nova máquina (`aws_instance.web[2]`) e o seu target group attachment (`aws_lb_target_group_attachment.web[2]`), que a registra no ALB:
+**9.** Veja o plano: deve haver **3 a adicionar** — a nova máquina (`aws_instance.web[2]`), o seu provisionamento via SSM (`terraform_data.provisiona[2]`) e o seu target group attachment (`aws_lb_target_group_attachment.web[2]`), que a registra no ALB:
 
 ```bash
 terraform plan
@@ -370,9 +398,9 @@ terraform plan
 
 ---
 
-<a id="passo-9"></a>
+<a id="passo-10"></a>
 
-**9.** Aplique a mudança:
+**10.** Aplique a mudança. Só a nova máquina (`web[2]`) é provisionada via SSM — as duas já existentes não mudam:
 
 ```bash
 terraform apply -auto-approve
@@ -386,9 +414,9 @@ No [painel do Load Balancer](https://us-east-1.console.aws.amazon.com/ec2/home?r
 
 ---
 
-<a id="passo-10"></a>
+<a id="passo-11"></a>
 
-**10.** Volte ao `main.tf` e reduza o `count` para `1`:
+**11.** Volte ao `main.tf` e reduza o `count` para `1`:
 
 ```bash
 code main.tf
@@ -398,9 +426,9 @@ code main.tf
 
 ---
 
-<a id="passo-11"></a>
+<a id="passo-12"></a>
 
-**11.** Aplique de novo. Desta vez serão **2 destruições** de máquina e **2 destruições** dos target group attachments correspondentes (sobra apenas `aws_instance.web[0]` e seu attachment):
+**12.** Aplique de novo. Desta vez serão **2 destruições** de máquina, mais os 2 provisionamentos (`terraform_data.provisiona[1]` e `[2]`) e os 2 target group attachments correspondentes (sobra apenas `aws_instance.web[0]`, seu provisionamento e seu attachment):
 
 ```bash
 terraform apply -auto-approve
@@ -414,9 +442,9 @@ No [painel do Load Balancer](https://us-east-1.console.aws.amazon.com/ec2/home?r
 
 ---
 
-<a id="passo-12"></a>
+<a id="passo-13"></a>
 
-**12.** Destrua **toda** a infra deste lab — a frota e também a rede criada no Lab 01.2. Primeiro a frota (estamos na pasta `03-Count`):
+**13.** Destrua **toda** a infra deste lab — a frota e também a rede criada no Lab 01.2. Primeiro a frota (estamos na pasta `03-Count`):
 
 ```bash
 terraform destroy -auto-approve
@@ -436,7 +464,7 @@ cd /workspaces/FIAP-Platform-Engineering/01-Terraform/demos/02-Modules/vpc-call 
 <summary><b>⚠ Se der erro: <code>DependencyViolation</code> ao destruir a VPC</b></summary>
 <blockquote>
 
-Causa: ainda há recurso preso na VPC (uma EC2 ou o ALB não terminou de morrer). Confirme que o `destroy` da pasta `03-Count` terminou de fato (sem instâncias `running` no painel EC2 e sem o load balancer `vortex-frota-alb` no painel) e que o `destroy` do `RT-call` rodou antes do `vpc-call`. Depois rode o `destroy` da VPC de novo.
+Causa: ainda há recurso preso na VPC (uma EC2 ou o ALB não terminou de morrer). Confirme que o `destroy` da pasta `03-Count` terminou de fato (sem instâncias `running` no painel EC2 e sem o load balancer `vortex-frota-alb` no painel) e que o `destroy` do `RT-call` rodou antes do `vpc-call` (passo 13). Depois rode o `destroy` da VPC de novo.
 
 </blockquote>
 </details>
@@ -464,7 +492,7 @@ Abra o próximo lab: **[Lab 01.4 — State remoto](../04-State/README.md)**.
 Lá vamos mover o estado do Terraform para um bucket S3 compartilhado, para que o time inteiro da Vortex colabore na mesma infraestrutura sem corromper o estado.
 
 > [!CAUTION]
-> **Custo:** este lab roda até 3 EC2 `t3.micro` (~$0,01/h cada) + 1 Application Load Balancer (~$0,0225/h + LCU; para a escala do lab, mesma ordem de grandeza). Confirme no painel EC2 que **nenhuma** instância ficou `running` e que o load balancer `vortex-frota-alb` sumiu após o passo 12. Esquecer ligado por um dia consome alguns dólares do orçamento do Learner Lab.
+> **Custo:** este lab roda até 3 EC2 `t3.micro` (~$0,01/h cada) + 1 Application Load Balancer (~$0,0225/h + LCU; para a escala do lab, mesma ordem de grandeza). Confirme no painel EC2 que **nenhuma** instância ficou `running` e que o load balancer `vortex-frota-alb` sumiu após o passo 13. Esquecer ligado por um dia consome alguns dólares do orçamento do Learner Lab.
 
 ---
 
@@ -490,6 +518,8 @@ Para fixar, faça o exercício prático: **[Exercício — Count com SQS](../../
 | **Health check** | Verificação periódica (`GET /`) que o ALB faz para decidir se um alvo recebe tráfego. |
 | **healthy / unhealthy** | Estados de um alvo no target group do ALB (aprovado / reprovado no health check). |
 | **check block (`check.tf`)** | Verificação pós-deploy (Terraform 1.5+); falha gera **aviso**, não erro, sem desfazer o `apply`. |
+| **SSM (Systems Manager)** | Serviço da AWS que executa o `script.sh` em cada EC2 sem SSH/porta 22; aqui provisiona a frota inteira via `terraform_data` + `count`. |
+| **Instance profile (`LabInstanceProfile`)** | Perfil IAM anexado a cada EC2 que concede a ela permissão de SSM no Learner Lab. |
 
 </blockquote>
 </details>

@@ -35,13 +35,3 @@ variable "instance_type" {
     error_message = "O Learner Lab so permite tamanhos nano, micro, small, medium ou large."
   }
 }
-
-variable "key_name" {
-  default = "vockey"
-}
-variable "path_to_key" {
-  default = "/home/vscode/.ssh/vockey.pem"
-}
-variable "instance_username" {
-  default = "ec2-user"
-}

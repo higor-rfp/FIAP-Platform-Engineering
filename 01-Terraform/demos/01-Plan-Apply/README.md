@@ -14,7 +14,7 @@ Os comandos `bash` deste lab rodam **no terminal do Codespaces**. As verificaç�
 >
 > - [ ] Credenciais AWS do Academy atualizadas no Codespaces — ver [Preparando Credenciais](../../../00-create-codespaces/Inicio-de-aula.md)
 > - [ ] Terraform instalado (`terraform -version` deve responder 1.x)
-> - [ ] Par de chaves `vockey` em `/home/vscode/.ssh/vockey.pem` (criado no setup)
+> - [ ] AWS CLI e `jq` disponíveis (o devcontainer já entrega; a Parte 2 valida isso de novo no passo 9)
 > - [ ] Você consegue abrir o [painel EC2](https://us-east-1.console.aws.amazon.com/ec2/home?region=us-east-1#Instances:)
 >
 > **Valide rapidamente:**
@@ -32,7 +32,7 @@ Neste laboratório vamos percorrer juntos o ciclo de vida básico do Terraform. 
 - entender o que cada comando do ciclo faz: `init`, `plan`, `apply`, `destroy`
 - ler um plano do Terraform e prever o que será criado
 - usar um `data source` para descobrir a AMI mais recente dinamicamente
-- usar `provisioner` para configurar a máquina após criá-la
+- provisionar a máquina recém-criada **via AWS Systems Manager (SSM)** — sem chave SSH e sem porta 22 aberta
 
 ## O que você terá ao final
 
@@ -46,10 +46,10 @@ Uma EC2 rodando Nginx, criada e destruída inteiramente por código — **a prov
 | Parte | O que você faz | Passos | Tempo |
 |-------|----------------|--------|-------|
 | [Parte 1](#parte-1---o-ciclo-básico-com-uma-ec2) | O ciclo básico com uma EC2 | [1](#passo-1) · [2](#passo-2) · [3](#passo-3) · [4](#passo-4) · [5](#passo-5) · [6](#passo-6) · [7](#passo-7) · [8](#passo-8) | ~12 min |
-| [Parte 2](#parte-2---uma-ec2-que-vira-servidor-web) | Uma EC2 que vira servidor web | [9](#passo-9) · [10](#passo-10) · [11](#passo-11) · [12](#passo-12) · [13](#passo-13) · [14](#passo-14) · [15](#passo-15) · [16](#passo-16) · [17](#passo-17) · [18](#passo-18) | ~18 min |
-| [Parte 3](#parte-3---lendo-o-plano-o-que-vai-mudar) | Lendo o plano: o que vai mudar | [19](#passo-19) · [20](#passo-20) · [21](#passo-21) · [22](#passo-22) | ~12 min |
-| [Parte 4](#parte-4---drift-quando-alguém-mexe-no-console) | Drift: quando alguém mexe no console | [23](#passo-23) · [24](#passo-24) · [25](#passo-25) · [26](#passo-26) | ~12 min |
-| [Parte 5](#parte-5---o-que-o-terraform-sabe-o-estado) | O que o Terraform sabe: o estado | [27](#passo-27) · [28](#passo-28) · [29](#passo-29) | ~8 min |
+| [Parte 2](#parte-2---uma-ec2-que-vira-servidor-web) | Uma EC2 que vira servidor web (provisionada via SSM) | [9](#passo-9) · [10](#passo-10) · [11](#passo-11) · [12](#passo-12) · [13](#passo-13) · [14](#passo-14) · [15](#passo-15) · [16](#passo-16) · [17](#passo-17) · [18](#passo-18) · [19](#passo-19) | ~18 min |
+| [Parte 3](#parte-3---lendo-o-plano-o-que-vai-mudar) | Lendo o plano: o que vai mudar | [20](#passo-20) · [21](#passo-21) · [22](#passo-22) · [23](#passo-23) | ~12 min |
+| [Parte 4](#parte-4---drift-quando-alguém-mexe-no-console) | Drift: quando alguém mexe no console | [24](#passo-24) · [25](#passo-25) · [26](#passo-26) · [27](#passo-27) | ~12 min |
+| [Parte 5](#parte-5---o-que-o-terraform-sabe-o-estado) | O que o Terraform sabe: o estado | [28](#passo-28) · [29](#passo-29) · [30](#passo-30) | ~8 min |
 
 > [!TIP]
 > Se travou em algum passo, clique no número dele na coluna **Passos**.
@@ -307,25 +307,39 @@ Se chegou até aqui, você:
 
 ### Resultado esperado desta parte
 
-Uma EC2 que, ao nascer, se configura sozinha como servidor Nginx, acessível pelo DNS público no navegador.
+Uma EC2 que, ao nascer, se configura sozinha como servidor Nginx — **provisionada via AWS Systems Manager (SSM), sem chave SSH e sem porta 22 aberta** — acessível pelo DNS público no navegador.
 
 ---
 
 <a id="passo-9"></a>
 
-**9.** Entre na pasta do exemplo com SSH/provisioner:
+**9.** Garanta as ferramentas do provisionamento. O provisionamento via SSM usa a **AWS CLI** e o **`jq`** na sua própria máquina (o Codespaces) para enviar o script à instância. O devcontainer já instala ambos, mas se você começou o lab por aqui (pulou os anteriores), este passo garante:
 
 ```bash
-cd /workspaces/FIAP-Platform-Engineering/01-Terraform/demos/01-Plan-Apply/EC2-ssh
+command -v aws >/dev/null || { echo "Instale o AWS CLI"; }
+command -v jq  >/dev/null || sudo apt-get install -y jq
+aws --version && jq --version
 ```
 
-Esta pasta usa a chave `vockey.pem` do setup para o Terraform conectar na máquina e rodar o script de instalação.
+Se as duas últimas linhas imprimirem as versões, está pronto. O `script.sh` que será enviado começa com `set -euo pipefail`, então qualquer falha de comando no servidor propaga o erro de volta e **aborta o `apply`** (mesma garantia de um provisioner SSH).
 
 ---
 
 <a id="passo-10"></a>
 
-**10.** Inicialize:
+**10.** Entre na pasta do exemplo provisionado via SSM:
+
+```bash
+cd /workspaces/FIAP-Platform-Engineering/01-Terraform/demos/01-Plan-Apply/EC2-ssh
+```
+
+Esta pasta cria a EC2 com o instance profile `LabInstanceProfile` (que já carrega a permissão SSM no Learner Lab) e provisiona o Nginx via SSM — sem chave privada, sem porta 22.
+
+---
+
+<a id="passo-11"></a>
+
+**11.** Inicialize:
 
 ```bash
 terraform init
@@ -333,56 +347,63 @@ terraform init
 
 ---
 
-<a id="passo-11"></a>
+<a id="passo-12"></a>
 
-**11.** Gere o plano:
+**12.** Gere o plano:
 
 ```bash
 terraform plan
 ```
 
 <details>
-<summary><b>💡 Clique para entender: o código desta pasta (EC2-ssh)</b></summary>
+<summary><b>💡 Clique para entender: o código desta pasta (provisionamento via SSM)</b></summary>
 <blockquote>
 
-A diferença para a Parte 1 é que aqui a instância **se autoconfigura** após nascer, usando `provisioner`.
+A diferença para a Parte 1 é que aqui a instância **se autoconfigura** após nascer. Na versão antiga isso era feito com um `provisioner "remote-exec"` por SSH (que exigia a chave `vockey.pem` e a porta 22 aberta). Agora usamos **AWS Systems Manager (SSM)** — sem chave, sem porta 22.
 
-**`instance.tf`**:
+**`instance.tf`** — a EC2 já **não tem** `key_name`, `connection` nem `provisioner` de SSH. Ela só carrega o instance profile que habilita o SSM, e um recurso `terraform_data` separado faz o provisionamento:
 
 ```hcl
 resource "aws_instance" "example" {
-  ami           = data.aws_ami.amazon_linux.id
-  instance_type = "t3.micro"
-  key_name      = var.key_name
+  ami                  = data.aws_ami.amazon_linux.id
+  instance_type        = "t3.micro"
+  iam_instance_profile = "LabInstanceProfile"
 
-  provisioner "file" {
-    source      = "script.sh"
-    destination = "/tmp/script.sh"
+  tags = {
+    Name = "vortex-web"
+  }
+}
+
+resource "terraform_data" "provisiona" {
+  triggers_replace = {
+    instance_id = aws_instance.example.id
+    script_hash = filesha256("${path.module}/script.sh")
   }
 
-  provisioner "remote-exec" {
-    inline = [
-      "chmod +x /tmp/script.sh",
-      "sudo /tmp/script.sh",
-    ]
-  }
-
-  connection {
-    user        = var.instance_username
-    private_key = file(var.path_to_key)
-    host        = self.public_dns
+  provisioner "local-exec" {
+    interpreter = ["bash", "-c"]
+    command     = <<-EOT
+      # 1. espera a instancia ficar Online no SSM
+      # 2. envia o script.sh via 'aws ssm send-command' (AWS-RunShellScript)
+      # 3. 'aws ssm wait' ate a execucao terminar
+      # 4. imprime o log do provisionamento
+      # 5. se o Status != Success, faz 'exit 1' e ABORTA o apply
+    EOT
   }
 }
 ```
 
-- `provisioner "file"` copia `script.sh` para dentro da máquina
-- `provisioner "remote-exec"` executa o script via SSH
-- `connection` diz como conectar: usuário `ec2-user`, a chave `vockey.pem`, no DNS público da própria instância (`self.public_dns`)
+Como funciona, em 4 ideias:
 
-**`script.sh`** instala o Nginx. Como migramos para Amazon Linux 2023, ele usa `dnf` (o antigo `amazon-linux-extras` não existe mais nessa versão):
+- **`LabInstanceProfile`** é o perfil de instância do Learner Lab que já traz a permissão `AmazonSSMManagedInstanceCore` na `LabRole`. É ele que permite o SSM Agent (pré-instalado na Amazon Linux 2023) registrar a máquina no Systems Manager.
+- O `terraform_data.provisiona` roda um `local-exec` **na sua máquina** (o Codespaces): com a AWS CLI ele faz `aws ssm send-command` mandando as linhas do `script.sh` para a instância, espera com `aws ssm wait command-executed`, imprime o `StandardOutputContent` (o **log aparece no próprio `apply`** — auditável) e, se o `Status` não for `Success`, faz `exit 1` — o que **aborta o `apply`**. É a mesma garantia "falhou o script, falhou o apply" do antigo provisioner SSH.
+- O `jq` monta a lista de comandos: o parâmetro `commands` do documento `AWS-RunShellScript` é um **array de linhas**, e `jq -R . script.sh | jq -s .` converte cada linha do script numa entrada do array.
+- **Sem chave, sem porta 22:** o SSM Agent fala de **dentro para fora** com o serviço (saída HTTPS), então não precisamos abrir nenhuma porta de entrada nem distribuir chave privada.
+
+**`script.sh`** instala o Nginx. Ele começa com `set -euo pipefail` (para que qualquer erro pare o script e seja capturado pelo SSM como falha) e usa `dnf`, já que migramos para Amazon Linux 2023 (o antigo `amazon-linux-extras` não existe mais):
 
 ```bash
-sudo dnf update -y
+set -euo pipefail
 sudo dnf install -y nginx
 sudo systemctl enable --now nginx
 ```
@@ -395,30 +416,30 @@ output "ec2_dns" {
 }
 ```
 
-> Provisioners são considerados "último recurso" pela HashiCorp (o ideal é `user_data` ou uma imagem pré-pronta), mas são didáticos para **ver** o Terraform conversando com a máquina. Documentação: [Provisioners](https://developer.hashicorp.com/terraform/language/resources/provisioners/syntax)
+Documentação: [aws ssm send-command](https://docs.aws.amazon.com/cli/latest/reference/ssm/send-command.html) · [terraform_data](https://developer.hashicorp.com/terraform/language/resources/terraform-data)
 
 </blockquote>
 </details>
 
 ---
 
-<a id="passo-12"></a>
-
-**12.** Antes do `apply`, precisamos liberar o tráfego de rede. Abra o [painel EC2 da AWS](https://us-east-1.console.aws.amazon.com/ec2/home?region=us-east-1#Home:) numa aba do navegador.
-
----
-
 <a id="passo-13"></a>
 
-**13.** No menu lateral esquerdo, clique em **Security Groups**.
-
-![](images/painelec2.png)
+**13.** Antes do `apply`, precisamos liberar o tráfego HTTP para conseguir abrir a página no navegador. Abra o [painel EC2 da AWS](https://us-east-1.console.aws.amazon.com/ec2/home?region=us-east-1#Home:) numa aba do navegador.
 
 ---
 
 <a id="passo-14"></a>
 
-**14.** Selecione o Security Group com `default` na coluna Nome. Vá à aba **Regras de entrada** e clique em **Editar regras de entrada**.
+**14.** No menu lateral esquerdo, clique em **Security Groups**.
+
+![](images/painelec2.png)
+
+---
+
+<a id="passo-15"></a>
+
+**15.** Selecione o Security Group com `default` na coluna Nome. Vá à aba **Regras de entrada** e clique em **Editar regras de entrada**.
 
 ![](images/sgpainel.png)
 
@@ -426,9 +447,9 @@ output "ec2_dns" {
 
 ---
 
-<a id="passo-15"></a>
+<a id="passo-16"></a>
 
-**15.** Apague as regras existentes, adicione uma regra liberando **Todo o tráfego** para **Qualquer Local-IPv4** e clique em **Salvar regras**.
+**16.** Apague as regras existentes, adicione uma regra liberando **HTTP (porta 80)** para **Qualquer Local-IPv4** e clique em **Salvar regras**.
 
 ![](images/anywhere.png)
 
@@ -437,23 +458,26 @@ output "ec2_dns" {
 ![](images/anywhere3.png)
 
 > [!NOTE]
-> Liberar tudo é aceitável **só** neste lab de aprendizado, no Learner Lab efêmero. Em produção, o Security Group seria restrito (porta 80 da internet, porta 22 só do seu IP) — e descrito em código, como faremos na demo Count.
-
----
-
-<a id="passo-16"></a>
-
-**16.** De volta ao Codespaces, provisione a máquina:
-
-```bash
-terraform apply -auto-approve
-```
+> Liberar a porta 80 para qualquer origem é aceitável **só** neste lab de aprendizado, no Learner Lab efêmero. Repare que **não precisamos abrir a porta 22**: o provisionamento é via SSM (que sai de dentro da máquina), não por SSH. Em produção, o Security Group seria descrito em código — como faremos na demo Count.
 
 ---
 
 <a id="passo-17"></a>
 
-**17.** Quando concluir, copie o `ec2_dns` do final do output e cole no navegador. Você verá a página inicial do Nginx.
+**17.** De volta ao Codespaces, provisione a máquina. Acompanhe o output: o Terraform cria a EC2, espera ela ficar `Online` no SSM e então **mostra o log do `script.sh`** (a instalação do Nginx) dentro do próprio `apply`:
+
+```bash
+terraform apply -auto-approve
+```
+
+> [!TIP]
+> Procure no output o bloco `----- log do provisionamento -----`. É o `StandardOutputContent` que o SSM devolveu — o mesmo que você veria logando na máquina, mas agora auditável direto no `apply`.
+
+---
+
+<a id="passo-18"></a>
+
+**18.** Quando concluir, copie o `ec2_dns` do final do output e cole no navegador. Você verá a página inicial do Nginx.
 
 ![](images/apply-3.png)
 
@@ -463,16 +487,25 @@ terraform apply -auto-approve
 <summary><b>⚠ Se der erro: a página do navegador não carrega</b></summary>
 <blockquote>
 
-Causa mais comum: o Security Group ainda não está liberando a porta 80, ou o `script.sh` ainda está rodando. Aguarde 1-2 minutos após o `apply` e confirme o passo 15. Se persistir, valide que a instância está `running` no painel e que o DNS colado é exatamente o do output (`http://<dns>`).
+Causa mais comum: o Security Group ainda não está liberando a porta 80. Confirme o passo 16. Se o `apply` terminou com `Status=Success` no log do provisionamento, o Nginx já está instalado — o problema é só a porta. Valide também que a instância está `running` no painel e que o DNS colado é exatamente o do output (`http://<dns>`).
+
+</blockquote>
+</details>
+
+<details>
+<summary><b>⚠ Se der erro: <code>aws: command not found</code> ou <code>jq: command not found</code> durante o apply</b></summary>
+<blockquote>
+
+O provisionamento via SSM roda na sua máquina (Codespaces) e precisa da AWS CLI e do `jq`. Volte ao passo 9 e rode os comandos de validação/instalação; depois rode `terraform apply -auto-approve` de novo.
 
 </blockquote>
 </details>
 
 ---
 
-<a id="passo-18"></a>
+<a id="passo-19"></a>
 
-**18.** Destrua os recursos e confirme no [painel EC2](https://us-east-1.console.aws.amazon.com/ec2/home?region=us-east-1#Instances:) que nada mais está rodando:
+**19.** Destrua os recursos e confirme no [painel EC2](https://us-east-1.console.aws.amazon.com/ec2/home?region=us-east-1#Instances:) que nada mais está rodando:
 
 ```bash
 terraform destroy -auto-approve
@@ -484,9 +517,9 @@ terraform destroy -auto-approve
 
 Se chegou até aqui, você:
 
-- criou uma EC2 que se autoconfigura como servidor web via provisioner
-- acessou o Nginx pelo DNS público
-- destruiu tudo
+- criou uma EC2 que se autoconfigura como servidor web, provisionada **via SSM** (sem chave SSH, sem porta 22)
+- viu o **log do provisionamento dentro do próprio `apply`**
+- acessou o Nginx pelo DNS público e destruiu tudo
 
 ---
 
@@ -500,9 +533,9 @@ Você vai aprender a distinguir os três símbolos do `plan` (`+` criar, `~` alt
 
 ---
 
-<a id="passo-19"></a>
+<a id="passo-20"></a>
 
-**19.** Volte para a pasta da EC2 simples (sem provisioner) e suba uma instância:
+**20.** Volte para a pasta da EC2 simples (sem provisionamento) e suba uma instância:
 
 ```bash
 cd /workspaces/FIAP-Platform-Engineering/01-Terraform/demos/01-Plan-Apply/EC2
@@ -511,9 +544,9 @@ terraform apply -auto-approve
 
 ---
 
-<a id="passo-20"></a>
+<a id="passo-21"></a>
 
-**20.** Agora **adicione uma tag** sem mudar mais nada. Abra o `instance.tf`:
+**21.** Agora **adicione uma tag** sem mudar mais nada. Abra o `instance.tf`:
 
 ```bash
 code instance.tf
@@ -566,9 +599,9 @@ terraform apply -auto-approve
 
 ---
 
-<a id="passo-21"></a>
+<a id="passo-22"></a>
 
-**21.** Agora provoque o outro tipo de mudança: **fixar a Availability Zone** da máquina. Edite o `instance.tf` e adicione a linha `availability_zone`:
+**22.** Agora provoque o outro tipo de mudança: **fixar a Availability Zone** da máquina. Edite o `instance.tf` e adicione a linha `availability_zone`:
 
 ```hcl
 resource "aws_instance" "example" {
@@ -604,9 +637,9 @@ Cada atributo de um recurso é marcado pelo provider como *updatable in-place* o
 
 ---
 
-<a id="passo-22"></a>
+<a id="passo-23"></a>
 
-**22.** **Não** aplique a recriação. Remova a linha `availability_zone` que você adicionou (voltando o `instance.tf` ao estado do passo 20, com a tag), confirme que o `plan` volta a `No changes`, e destrua:
+**23.** **Não** aplique a recriação. Remova a linha `availability_zone` que você adicionou (voltando o `instance.tf` ao estado do passo 21, com a tag), confirme que o `plan` volta a `No changes`, e destrua:
 
 ```bash
 terraform plan
@@ -635,9 +668,9 @@ Você vai criar uma EC2 por código, **alterá-la pelo console/CLI da AWS** (sim
 
 ---
 
-<a id="passo-23"></a>
+<a id="passo-24"></a>
 
-**23.** Suba a EC2 simples de novo e guarde o ID dela numa variável de shell. A pasta `EC2` tem um `outputs.tf` que expõe o `instance_id`, então usamos `terraform output -raw` (saída limpa, sem formatação):
+**24.** Suba a EC2 simples de novo e guarde o ID dela numa variável de shell. A pasta `EC2` tem um `outputs.tf` que expõe o `instance_id`, então usamos `terraform output -raw` (saída limpa, sem formatação):
 
 ```bash
 cd /workspaces/FIAP-Platform-Engineering/01-Terraform/demos/01-Plan-Apply/EC2
@@ -648,9 +681,9 @@ echo "Instância gerenciada pelo Terraform: $INSTANCE_ID"
 
 ---
 
-<a id="passo-24"></a>
+<a id="passo-25"></a>
 
-**24.** Agora **simule o "alguém mexeu no console"**: adicione uma tag direto pela AWS CLI, **por fora** do Terraform.
+**25.** Agora **simule o "alguém mexeu no console"**: adicione uma tag direto pela AWS CLI, **por fora** do Terraform.
 
 ```bash
 aws ec2 create-tags --resources "$INSTANCE_ID" --tags Key=MexidoNaMao,Value=sim
@@ -661,9 +694,9 @@ aws ec2 create-tags --resources "$INSTANCE_ID" --tags Key=MexidoNaMao,Value=sim
 
 ---
 
-<a id="passo-25"></a>
+<a id="passo-26"></a>
 
-**25.** Peça um `plan`. O Terraform compara o estado real (que ele relê da AWS) com o código e **detecta o drift**:
+**26.** Peça um `plan`. O Terraform compara o estado real (que ele relê da AWS) com o código e **detecta o drift**:
 
 ```bash
 terraform plan
@@ -688,9 +721,9 @@ Documentação oficial: [Manage resource drift](https://developer.hashicorp.com/
 
 ---
 
-<a id="passo-26"></a>
+<a id="passo-27"></a>
 
-**26.** Reconcilie e destrua:
+**27.** Reconcilie e destrua:
 
 ```bash
 terraform apply -auto-approve
@@ -719,9 +752,9 @@ Você vai inspecionar o estado do Terraform — a estrutura que ele usa para sab
 
 ---
 
-<a id="passo-27"></a>
+<a id="passo-28"></a>
 
-**27.** Suba a EC2 mais uma vez e liste o que o Terraform está rastreando:
+**28.** Suba a EC2 mais uma vez e liste o que o Terraform está rastreando:
 
 ```bash
 cd /workspaces/FIAP-Platform-Engineering/01-Terraform/demos/01-Plan-Apply/EC2
@@ -733,9 +766,9 @@ Você verá `data.aws_ami.amazon_linux` e `aws_instance.example` — os objetos 
 
 ---
 
-<a id="passo-28"></a>
+<a id="passo-29"></a>
 
-**28.** Veja os detalhes do recurso no estado:
+**29.** Veja os detalhes do recurso no estado:
 
 ```bash
 terraform state show aws_instance.example
@@ -761,9 +794,9 @@ Documentação oficial: [Purpose of Terraform state](https://developer.hashicorp
 
 ---
 
-<a id="passo-29"></a>
+<a id="passo-30"></a>
 
-**29.** Destrua para encerrar o lab:
+**30.** Destrua para encerrar o lab:
 
 ```bash
 terraform destroy -auto-approve
@@ -809,7 +842,9 @@ Lá vamos componentizar a rede da Vortex (VPC + subnets + route tables) em módu
 | **State / Estado** | Arquivo onde o Terraform registra o que já criou, para saber o que mudar no próximo `apply`. |
 | **Data source** | Bloco `data` que **lê** informação existente (ex.: a AMI mais recente) sem criá-la. |
 | **Resource** | Bloco `resource` que **cria/gerencia** um objeto na nuvem (ex.: `aws_instance`). |
-| **Provisioner** | Mecanismo que roda comandos na máquina após criá-la (copiar arquivo, executar script). |
+| **SSM (Systems Manager)** | Serviço da AWS que executa comandos numa EC2 sem SSH/porta 22; o agente fala de dentro para fora com o serviço. |
+| **`terraform_data` + `local-exec`** | Recurso que roda um comando na sua máquina (Codespaces); aqui dispara o `aws ssm send-command` e aborta o `apply` se o script falhar. |
+| **Instance profile (`LabInstanceProfile`)** | Perfil IAM anexado à EC2 que concede a ela permissão de SSM no Learner Lab. |
 | **AMI** | Amazon Machine Image — a imagem de SO que a EC2 inicializa. |
 | **Security Group** | Firewall virtual da AWS que controla o tráfego de entrada/saída de um recurso. |
 
@@ -822,7 +857,7 @@ Lá vamos componentizar a rede da Vortex (VPC + subnets + route tables) em módu
 
 Antes de pedir ajuda, colete estas 4 informações — elas aceleram muito a resposta:
 
-1. **Em que passo você está** (ex.: "passo 16, rodando o `apply`")
+1. **Em que passo você está** (ex.: "passo 17, rodando o `apply`")
 2. **Mensagem de erro literal** (copie o texto do terminal, não um screenshot)
 3. **Saída de** `terraform -version` e `aws sts get-caller-identity`
 4. **O que você já tentou**

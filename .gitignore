@@ -119,3 +119,7 @@ Antigo/*
 *Icon*
 
 # A pasta import-demo (demo 01.2) e versionada, mas seus artefatos locais nao
+
+# Configuracao local do Claude Code - nunca versionar
+.claude/
+CLAUDE.md

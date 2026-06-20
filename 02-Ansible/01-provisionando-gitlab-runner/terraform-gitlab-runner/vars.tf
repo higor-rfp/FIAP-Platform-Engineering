@@ -5,15 +5,3 @@ variable "aws_region" {
 variable "project" {
   default = "fiap-lab"
 }
-
-variable "key_name" {
-  default = "vockey"
-}
-
-variable "path_to_key" {
-  default = "/home/vscode/.ssh/vockey.pem"
-}
-
-variable "instance_username" {
-  default = "ubuntu"
-}

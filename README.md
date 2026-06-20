@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="FIAP.png" alt="FIAP" width="100%"/>
+  <img src="FIAP.png" alt="FIAP - Platform Engineering" width="100%"/>
 </p>
 
 # Platform Engineering

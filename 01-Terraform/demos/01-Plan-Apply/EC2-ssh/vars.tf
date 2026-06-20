@@ -1,6 +1,11 @@
 variable "aws_region" {
-  description = "Regiao AWS onde a infraestrutura sera criada."
+  description = "Regiao AWS onde a infraestrutura sera criada. O Learner Lab so permite us-east-1 ou us-west-2."
   default     = "us-east-1"
+
+  validation {
+    condition     = contains(["us-east-1", "us-west-2"], var.aws_region)
+    error_message = "O AWS Academy Learner Lab so permite us-east-1 ou us-west-2."
+  }
 }
 
 # Busca dinamica da Amazon Linux 2023 mais recente, evitando AMIs hardcoded que expiram.
@@ -17,19 +22,4 @@ data "aws_ami" "amazon_linux" {
     name   = "virtualization-type"
     values = ["hvm"]
   }
-}
-
-variable "key_name" {
-  description = "Nome do par de chaves usado para acesso SSH (criado no setup do Learner Lab)."
-  default     = "vockey"
-}
-
-variable "path_to_key" {
-  description = "Caminho local da chave privada usada pelo provisioner remote-exec."
-  default     = "/home/vscode/.ssh/vockey.pem"
-}
-
-variable "instance_username" {
-  description = "Usuario padrao da AMI Amazon Linux para conexao SSH."
-  default     = "ec2-user"
 }

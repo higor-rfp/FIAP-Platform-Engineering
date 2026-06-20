@@ -353,10 +353,11 @@ Com `use_lockfile = true` (Terraform 1.10+), antes de escrever o estado o Terraf
 
 Antes do TF 1.10, esse controle exigia uma **tabela DynamoDB** separada (`dynamodb_table`) só para guardar o lock. Era mais uma peça de infra para criar, pagar e manter. O `use_lockfile` resolve tudo dentro do próprio bucket — menos recursos, mesma garantia.
 
-Você pode **ver** o `.tflock` no S3 enquanto o terminal A segura o lock:
+Você pode **ver** o `.tflock` no S3 enquanto o terminal A segura o lock (o comando descobre sozinho o nome do seu bucket `base-config`):
 
 ```bash
-aws s3 ls s3://base-config-SEU-RM/demo-state/
+BUCKET=$(aws s3 ls | awk '{print $3}' | grep '^base-config' | head -1)
+aws s3 ls "s3://$BUCKET/demo-state/"
 ```
 
 Vai listar `terraform.tfstate` **e** `terraform.tfstate.tflock`. Assim que você liberar o terminal A (próximo passo), o `.tflock` some.
@@ -545,11 +546,12 @@ Você lista as versões do tfstate no bucket (base de um DR de estado) e entende
 
 <a id="passo-20"></a>
 
-**20.** O bucket tem **versionamento**: cada `apply` gravou uma versão nova do tfstate. Liste-as:
+**20.** O bucket tem **versionamento**: cada `apply` gravou uma versão nova do tfstate. Liste-as (o comando descobre sozinho o nome do seu bucket `base-config`):
 
 ```bash
+BUCKET=$(aws s3 ls | awk '{print $3}' | grep '^base-config' | head -1)
 aws s3api list-object-versions \
-  --bucket base-config-SEU-RM \
+  --bucket "$BUCKET" \
   --prefix demo-state/terraform.tfstate \
   --query "Versions[].{VersionId:VersionId,LastModified:LastModified,Latest:IsLatest}" \
   --output table
@@ -565,8 +567,9 @@ Se um `apply` errado ou um `state rm` acidental corromper o estado, você pode *
 
 ```bash
 # conceitual — recupera o conteudo de uma versao especifica para um arquivo local
+BUCKET=$(aws s3 ls | awk '{print $3}' | grep '^base-config' | head -1)
 aws s3api get-object \
-  --bucket base-config-SEU-RM \
+  --bucket "$BUCKET" \
   --key demo-state/terraform.tfstate \
   --version-id <VERSION_ID_ANTERIOR> \
   estado-recuperado.tfstate

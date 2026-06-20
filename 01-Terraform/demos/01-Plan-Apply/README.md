@@ -609,7 +609,15 @@ terraform apply -auto-approve
 
 <a id="passo-22"></a>
 
-**22.** Agora provoque o outro tipo de mudança: **fixar a Availability Zone** da máquina. Edite o `instance.tf` e adicione a linha `availability_zone`:
+**22.** Agora provoque o outro tipo de mudança: **fixar a Availability Zone** da máquina.
+
+**22.1.** Abra novamente o arquivo `instance.tf` no editor:
+
+```bash
+code instance.tf
+```
+
+**22.2.** Apague **todo** o conteúdo do arquivo e cole exatamente o texto abaixo no lugar (é o arquivo inteiro — a única diferença em relação ao passo 21 é a nova linha `availability_zone`):
 
 ```hcl
 resource "aws_instance" "example" {
@@ -623,7 +631,9 @@ resource "aws_instance" "example" {
 }
 ```
 
-Rode o `plan`:
+**22.3.** Salve o arquivo (no editor do Codespaces: menu **File → Save**, ou `Ctrl+S` / `Cmd+S` no Mac).
+
+**22.4.** Rode o `plan`:
 
 ```bash
 terraform plan

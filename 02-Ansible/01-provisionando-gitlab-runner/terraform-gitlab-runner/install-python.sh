@@ -11,7 +11,10 @@ apt-get update -y
 # Usamos o Python 3 NATIVO do Ubuntu 22.04 (3.10). Nao usamos mais o PPA deadsnakes
 # nem python3.8: o virtualenv moderno nao suporta mais 3.8, e o python3 do SO ja
 # atende o Ansible. So garantimos pip, venv e utilitarios.
-apt-get install -y python3 python3-pip python3-venv python3-apt unzip curl
+# jq: usado pelo provisionamento via SSM (terraform_data envia o script com
+# 'jq -R') dos labs baseados na demo Count — inclusive o Trabalho Final rodando
+# no pipeline. Sem jq no runner, o 'terraform apply' falharia com 'jq: not found'.
+apt-get install -y python3 python3-pip python3-venv python3-apt unzip curl jq
 
 # AWS CLI v2 oficial (nao o awscli v1 do apt). O v1 do apt depende de um botocore
 # antigo do sistema e quebra ('KeyError: opsworkscm') quando outra lib atualiza o

@@ -180,6 +180,12 @@ O runner roda numa EC2 com o `LabRole` (instance profile), então o `terraform` 
 > ## ✋ Daqui em diante começa o trabalho que será avaliado
 > A partir da Parte 1, é **você** que desenvolve: o módulo Terraform, os workspaces e o `.gitlab-ci.yml`. O palco (runner) já está pronto — o foco agora é **código e lógica**.
 
+Todo o código do trabalho você cria e roda **na pasta do Trabalho Final**. O script da Parte 0 pode ter deixado você em outro diretório, então entre nela agora — e é daqui que os comandos das próximas partes assumem que você está:
+
+```bash
+cd /workspaces/FIAP-Platform-Engineering/Trabalho-final
+```
+
 ---
 
 ## Parte 1 - Modularizar a demo Count

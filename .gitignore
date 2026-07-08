@@ -123,3 +123,6 @@ Antigo/*
 # Configuracao local do Claude Code - nunca versionar
 .claude/
 CLAUDE.md
+
+# Gabarito do Trabalho Final - apoio do professor, nunca versionar
+Trabalho-final/gabarito/

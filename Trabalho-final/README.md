@@ -760,9 +760,15 @@ Sem os artefatos pesados/locais (`.terraform/`, state, `build/`, `plan.tfplan`):
 ```bash
 cd /workspaces/FIAP-Platform-Engineering/Trabalho-final
 zip -r trabalho-final-<SEU-RM>.zip . \
-  -x '*/.terraform/*' -x '*.tfstate*' -x '*.terraform.lock.hcl' \
-  -x '*/build/*' -x 'plan.tfplan' -x '*/.git/*'
+  -x '.terraform/*' -x '*/.terraform/*' \
+  -x '*.tfstate*' -x '*.terraform.lock.hcl' \
+  -x 'build/*' -x '*/build/*' \
+  -x 'plan.tfplan' \
+  -x '.git/*' -x '*/.git/*'
 ```
+
+> [!NOTE]
+> Precisa dos padrões com **e** sem `*/`: o `.terraform/` (e o `build/`) ficam na **raiz** do projeto, e `*/.terraform/*` só casaria os de subpasta. Confira o que entrou com `unzip -l trabalho-final-<SEU-RM>.zip`. Se já tinha gerado um zip com o `.terraform` dentro, apague-o e rode de novo.
 
 No painel de arquivos do Codespaces, clique com o botão direito em `trabalho-final-<SEU-RM>.zip` → **Download**.
 

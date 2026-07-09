@@ -263,7 +263,11 @@ Você vai pegar a infra da demo Count (o ALB + as N EC2 com Nginx) e empacotá-l
 </dt>
 <dd>
 
-A pasta é `modules/web-cluster/`.
+Estando em `/workspaces/trabalho-final`:
+
+```bash
+mkdir -p modules/web-cluster
+```
 
 </dd>
 <dt>
@@ -291,7 +295,7 @@ Copie tudo — não escolha recursos soltos: os arquivos dependem uns dos outros
 </dt>
 <dd>
 
-Remova o bloco `backend` e o `provider "aws"`, se vieram junto — eles ficam no arquivo raiz (Requisito 2), nunca no módulo.
+Remova o bloco `backend` e o `provider "aws"`, se vieram junto — eles ficam no arquivo raiz (Requisito 2), nunca no módulo. Já o `versions.tf` (com o `required_providers`) e o `check.tf` (um health-check que verifica se o ALB responde 200 no fim do apply) **podem ficar no módulo** — não precisa mexer neles.
 
 </dd>
 <dt>
@@ -311,7 +315,7 @@ Crie a variável `node_count` e use-a no `count` das instâncias, no lugar do n�
 </dt>
 <dd>
 
-No arquivo **`outputs.tf` do módulo** (ele já veio da demo Count no passo 1.2 — é só editá-lo), declare um `output` que devolve `aws_lb.<seu_alb>.dns_name`. **Dê a ele o nome `alb_dns`** — o arquivo raiz vai consumi-lo no Requisito 2, e os comandos de teste (Requisito 8 e Parte 4) usam esse nome. (A demo Count expõe o ALB com outro nome de output; aqui padronizamos como `alb_dns`.)
+No arquivo **`outputs.tf` do módulo** (ele já veio da demo Count no passo 1.2 — é só editá-lo), o ALB é exposto no output `alb_public`. **Renomeie esse output para `alb_dns`** (ele devolve `aws_lb.<seu_alb>.dns_name`) — o arquivo raiz vai consumi-lo no Requisito 2, e os comandos de teste (Requisito 8 e Parte 4) usam esse nome. O outro output do arquivo (`address`) pode ficar como está.
 
 </dd>
 </dl>
@@ -392,9 +396,12 @@ Num arquivo **`outputs.tf` na raiz do projeto** (fora de `modules/`), crie um `o
 ```bash
 cd /workspaces/trabalho-final
 terraform init -backend=false
-terraform fmt -check
+terraform fmt          # formata seus arquivos
 terraform validate
 ```
+
+> [!NOTE]
+> Rode o `terraform fmt` (sem `-check`) para **formatar** o código antes de subir: o stage `validar` do pipeline (Requisito 7) roda `terraform fmt -check`, que **reprova** se algum arquivo não estiver formatado. Formatando aqui, o pipeline passa.
 
 </dd>
 </dl>
@@ -770,14 +777,14 @@ Todo o código do trabalho, **na estrutura em que você o desenvolveu** — algo
 
 ```text
 trabalho-final/
-├── main.tf                 # raiz: provider + chamada do modulo + output
+├── main.tf                 # raiz: provider + chamada do modulo + output alb_dns
 ├── backend.tf              # state remoto no S3
-├── versions.tf
 ├── .gitlab-ci.yml          # pipeline de 3 stages
+├── .gitignore
 ├── modules/
 │   └── web-cluster/        # o modulo que voce criou a partir da demo Count
-│       ├── main.tf · variables.tf · data.tf · outputs.tf · script.sh
-└── prints/                 # as evidencias de que o pipeline rodou (abaixo)
+│       ├── main.tf · securitygroup.tf · variables.tf · versions.tf · outputs.tf · check.tf · script.sh
+└── prints/                 # as evidencias de que o pipeline rodou (adicionadas na sua maquina, passo 9.2)
     ├── 01-pipeline-verde.png
     ├── 02-tests-checkov.png
     └── 03-api-no-ar.png
@@ -856,13 +863,17 @@ Descompacte o zip baixado, crie uma pasta `prints/` dentro dele, mova para lá o
 > **Destrua a infraestrutura ao terminar** — este é o fim do arco, então derrube **tudo**: a infra do trabalho (EC2 + ALB em `dev` e `prod`) **e** o runner da Parte 0. Deixar ligado consome o orçamento do Learner Lab. Como a entrega é código + prints, **nada se perde** ao destruir.
 >
 > ```bash
-> # 1) infra do trabalho, nos dois ambientes
+> # 1) infra do trabalho, nos dois ambientes (o backend.tf do clone ja tem o seu bucket)
 > cd /workspaces/trabalho-final
+> terraform init
 > terraform workspace select dev  && terraform destroy -auto-approve
 > terraform workspace select prod && terraform destroy -auto-approve
 >
-> # 2) o runner da Parte 0 (a EC2 provisionada pelo script)
+> # 2) o runner da Parte 0 (a EC2 provisionada pelo script). O state.tf do runner usa
+> #    um bucket placeholder; o bucket real entra via -backend-config (igual ao script).
 > cd /workspaces/FIAP-Platform-Engineering/02-Ansible/01-provisionando-gitlab-runner/terraform-gitlab-runner
+> BUCKET=$(aws s3 ls | awk '{print $3}' | grep '^base-config' | head -1)
+> terraform init -reconfigure -backend-config="bucket=$BUCKET"
 > terraform destroy -auto-approve
 > ```
 

@@ -16,7 +16,7 @@ Este é o **Trabalho Final** da disciplina. Ele consolida tudo que você pratico
 > **Pré-requisitos obrigatórios antes de começar:**
 >
 > - [ ] Módulo **01 - Terraform** concluído (você sabe rodar `plan`/`apply`, criar módulos, usar `count`, state remoto no S3 e workspaces)
-> - [ ] Módulo **02 - Ansible** concluído (você entende como o GitLab Runner é provisionado — aqui você **não** o sobe na mão, um script faz isso na Parte 0)
+> - [ ] Módulo **02 - Ansible** concluído (você entende como o GitLab Runner é provisionado, aqui você **não** o sobe na mão, um script faz isso na Parte 0)
 > - [ ] Módulo **03 - CI/CD** concluído (você fez ao menos um pipeline rodar `plan`/`apply` com etapa de validação)
 > - [ ] Credenciais AWS do Academy atualizadas no Codespaces
 > - [ ] Acesso ao seu GitLab com permissão para criar repositório e runner
@@ -34,7 +34,7 @@ Este é o **Trabalho Final** da disciplina. Ele consolida tudo que você pratico
 
 ## Objetivo
 
-Provar — com um artefato funcional — que a infraestrutura da Vortex é **código versionado, reproduzível e validado automaticamente**: um `push` valida, barra o inseguro e provisiona tudo sozinho.
+Provar, com um artefato funcional, que a infraestrutura da Vortex é **código versionado, reproduzível e validado automaticamente**: um `push` valida, barra o inseguro e provisiona tudo sozinho.
 
 ## O que você vai entregar
 
@@ -48,8 +48,7 @@ Ao final, você terá um **repositório GitLab** que:
 
 A **entrega** (Parte 4) é um `.zip` com esse código Terraform e alguns **prints que provam que o pipeline rodou** (o código já é a prova do resto).
 
-> [!TIP]
-> Sempre que encontrar um bloco com o título **💡 Clique para entender**, abra-o. Ele traz a anatomia do requisito, o porquê da escolha e links oficiais. Não é obrigatório para concluir, mas aprofunda.
+Sempre que encontrar um bloco **💡 Clique para entender**, abra-o: traz a anatomia do requisito, o porquê da escolha e links oficiais. Não é obrigatório para concluir, mas aprofunda.
 
 ## Mapa do trabalho
 
@@ -61,12 +60,11 @@ A **entrega** (Parte 4) é um `.zip` com esse código Terraform e alguns **print
 | [Parte 3](#parte-3---pipeline-de-cicd-end-to-end) | Pipeline de CI/CD end-to-end | [7](#req-7) · [8](#req-8) | ~90 min |
 | [Parte 4](#parte-4---empacotar-e-submeter) | Empacotar e submeter | [9](#req-9) | ~15 min |
 
-> [!TIP]
-> Se travou em algum requisito, clique no número na coluna **Requisitos** acima para ir direto.
+Se travou em algum requisito, clique no número na coluna **Requisitos** acima para ir direto.
 
 ## Contexto
 
-Cada conceito foi praticado isolado (um lab para `count`, um para state, um para o pipeline). Aqui eles coexistem no **mesmo repositório**, sob o mesmo fluxo — é o que mais se parece com o dia a dia de um Platform Engineer: juntar peças soltas num sistema reproduzível.
+Cada conceito foi praticado isolado (um lab para `count`, um para state, um para o pipeline). Aqui eles coexistem no **mesmo repositório**, sob o mesmo fluxo — o que mais se parece com o dia a dia de um Platform Engineer: juntar peças soltas num sistema reproduzível.
 
 A base é a **demo Count** ([`01-Terraform/demos/03-Count`](../01-Terraform/demos/03-Count/README.md)): N instâncias EC2 com Nginx atrás de um **ALB**. Você a evolui de "demo que roda na sua máquina" para "projeto que roda sozinho via pipeline, em dois ambientes, auditável".
 
@@ -91,7 +89,7 @@ Documentação oficial:
 
 ### A arquitetura que você vai construir
 
-Quando o trabalho estiver concluído, é isto que estará no ar: um `git push` que, sozinho, valida, revisa a segurança e provisiona a infraestrutura da Vortex. Este é o destino — as partes a seguir te levam até ele, peça por peça.
+Quando o trabalho estiver concluído, é isto que estará no ar: um `git push` que, sozinho, valida, revisa a segurança e provisiona a infraestrutura da Vortex. Este é o destino; as partes a seguir te levam até ele, peça por peça.
 
 ![Arquitetura final do Trabalho Final: um git push no repositório GitLab dispara o pipeline de 3 stages (validar, revisar com Checkov, aplicar) no GitLab Runner próprio (EC2 com LabRole); o terraform apply lê/grava o state no S3 e provisiona, na VPC fiap-lab, um ALB com Target Group distribuindo tráfego para as EC2 nginx (1 nó em dev, 3 em prod) sob um Security Group.](img/arquitetura-final.png)
 
@@ -101,19 +99,29 @@ Quando o trabalho estiver concluído, é isto que estará no ar: um `git push` q
 
 ### Resultado esperado desta parte
 
-Seu **runner próprio** de pé e **online** no GitLab, pronto para rodar o pipeline — sem você configurar servidor na mão. Esta parte **não é o foco do trabalho** (subir o runner você já aprendeu no Módulo 02); por isso ela é a mais automatizada possível: você cria o repositório, garante sua chave SSH, gera o token do runner e roda **um script** que provisiona tudo.
+Seu **runner próprio** de pé e **online** no GitLab, pronto para rodar o pipeline, sem você configurar servidor na mão. Esta parte **não é o foco do trabalho** (subir o runner você já aprendeu no Módulo 02); por isso ela é a mais automatizada possível: você cria o repositório, garante sua chave SSH, gera o token do runner e roda **um script** que provisiona tudo.
 
-> [!NOTE]
-> O que **vale nota** no Trabalho Final é o **código** que você escreve a partir da Parte 1 (o módulo Terraform, os workspaces e o `.gitlab-ci.yml`). O provisionamento do runner é só o palco — deixamos pronto de propósito para você gastar seu tempo no que importa.
+O que **vale nota** no Trabalho Final é o **código** que você escreve a partir da Parte 1 (o módulo Terraform, os workspaces e o `.gitlab-ci.yml`). O provisionamento do runner é só o palco: deixamos pronto de propósito para você gastar seu tempo no que importa.
 
 > [!IMPORTANT]
-> **Como o pipeline se autentica na AWS (autorização do CI/CD):** ao contrário do CI/CD "de mercado", você **não** vai cadastrar `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` como *CI/CD Variables* no GitLab. O pipeline roda **no seu runner**, que é uma EC2 com o **`LabRole`** anexado (instance profile). O `terraform` do pipeline herda essa permissão automaticamente — **nenhum segredo da AWS entra no GitLab**. É por isso que basta o runner estar online: ele já está autorizado a criar a infra.
+> **Como o pipeline se autentica na AWS (autorização do CI/CD):** ao contrário do CI/CD "de mercado", você **não** vai cadastrar `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` como *CI/CD Variables* no GitLab. O pipeline roda **no seu runner**, que é uma EC2 com o **`LabRole`** anexado (instance profile). O `terraform` do pipeline herda essa permissão automaticamente: **nenhum segredo da AWS entra no GitLab**. É por isso que basta o runner estar online: ele já está autorizado a criar a infra.
 
 ---
 
 <a id="prep-1"></a>
 
-**Passo 0.1.** No **GitLab**, crie o repositório do trabalho: acesse **[Novo projeto](https://gitlab.com/projects/new)** → **Create blank project**, nomeie **`trabalho-final`**, deixe **Public** e **desmarque** "Initialize repository with a README". Ao criar, **guarde a URL SSH** do projeto (`git@gitlab.com:<seu-usuario>/trabalho-final.git`) — você a usa no `git push` da Parte 3.
+<dl>
+<dt>
+
+**Passo 0.1. Crie o repositório no GitLab**
+
+</dt>
+<dd>
+
+Acesse **[Novo projeto](https://gitlab.com/projects/new)** → **Create blank project**, nomeie **`trabalho-final`**, deixe **Public** e **desmarque** "Initialize repository with a README". Ao criar, **guarde a URL SSH** do projeto (`git@gitlab.com:<seu-usuario>/trabalho-final.git`); você a usa no `git push` da Parte 3.
+
+</dd>
+</dl>
 
 <details>
 <summary><b>💡 Não lembra onde clicar?</b></summary>
@@ -128,10 +136,18 @@ Seu **runner próprio** de pé e **online** no GitLab, pronto para rodar o pipel
 
 <a id="prep-2"></a>
 
-**Passo 0.2.** O `git push` para o GitLab usa uma **chave SSH sua**. **Se você abriu um Codespaces novo, a chave do Módulo 02 sumiu** — então garanta a chave agora. No **terminal do Codespaces**:
+<dl>
+<dt>
+
+**Passo 0.2. Garanta a chave SSH**
+
+</dt>
+<dd>
+
+O `git push` para o GitLab usa uma **chave SSH sua**. **Se você abriu um Codespaces novo, a chave do Módulo 02 sumiu**; garanta a chave agora, no **terminal do Codespaces**:
 
 ```bash
-# Se o .pub existir, a chave já está aqui — pule para o passo 0.3.
+# Se o .pub existir, a chave já está aqui: pule para o passo 0.3.
 # Se NÃO existir (Codespaces novo), o comando abaixo cria a chave:
 ls /home/vscode/.ssh/gitlab.pub 2>/dev/null || ssh-keygen -t rsa -b 2048 -C "gitlab key" -f /home/vscode/.ssh/gitlab -N ""
 
@@ -140,7 +156,10 @@ eval "$(ssh-agent -s)" && ssh-add /home/vscode/.ssh/gitlab
 cat /home/vscode/.ssh/gitlab.pub
 ```
 
-Copie a saída do `cat` e cole em **[Chaves SSH do GitLab](https://gitlab.com/-/user_settings/ssh_keys)** → **Add new key** (se ela já estava lá de antes, pode pular).
+Copie a saída do `cat` e cole em **[Chaves SSH do GitLab](https://gitlab.com/-/user_settings/ssh_keys)** → **Add new key** (se ela já estava lá, pode pular).
+
+</dd>
+</dl>
 
 <details>
 <summary><b>💡 Detalhes do fluxo de chave SSH</b></summary>
@@ -155,13 +174,24 @@ Copie a saída do `cat` e cole em **[Chaves SSH do GitLab](https://gitlab.com/-/
 
 <a id="prep-3"></a>
 
-**Passo 0.3.** Ainda no GitLab, no projeto `trabalho-final`, vá em **Settings → CI/CD → Runners → Create project runner**, marque as **tags `shell` e `terraform`** e **copie o token** (`glrt-...`). É o mesmo fluxo do [Módulo 02](../02-Ansible/01-provisionando-gitlab-runner/README.md#parte-5---gerando-o-token-do-runner-e-guardando-no-ssm) — como o projeto é novo, o token também é novo.
+<dl>
+<dt>
+
+**Passo 0.3. Crie o runner e copie o token**
+
+</dt>
+<dd>
+
+Ainda no GitLab, no projeto `trabalho-final`, vá em **Settings → CI/CD → Runners → Create project runner**, marque as **tags `shell` e `terraform`** e **copie o token** (`glrt-...`). É o mesmo fluxo do [Módulo 02](../02-Ansible/01-provisionando-gitlab-runner/README.md#parte-5---gerando-o-token-do-runner-e-guardando-no-ssm); como o projeto é novo, o token também é novo.
+
+</dd>
+</dl>
 
 <details>
 <summary><b>💡 Por que tags `shell` e `terraform`?</b></summary>
 <blockquote>
 
-O `.gitlab-ci.yml` que você vai escrever roteia os jobs com `tags: [shell]`. O runner precisa ter essa tag para pegar os jobs — por isso a marcamos aqui, na criação. É o mesmo par de tags do runner do Módulo 02.
+O `.gitlab-ci.yml` que você vai escrever roteia os jobs com `tags: [shell]`. O runner precisa ter essa tag para pegar os jobs; por isso a marcamos aqui, na criação. É o mesmo par de tags do runner do Módulo 02.
 
 </blockquote>
 </details>
@@ -170,15 +200,40 @@ O `.gitlab-ci.yml` que você vai escrever roteia os jobs com `tags: [shell]`. O 
 
 <a id="prep-4"></a>
 
-**Passo 0.4.** No **terminal do Codespaces**, guarde o token no **SSM Parameter Store**, no parâmetro **`/fiap/gitlab-runner/token`** (é dele que o script e o playbook leem — nada de segredo em arquivo). **Você já fez exatamente isso no Módulo 02**, ao registrar o seu runner.
+<dl>
+<dt>
 
-> 📚 O comando para gravar o token como `SecureString` no SSM está na **[Parte 5 do Módulo 02](../02-Ansible/01-provisionando-gitlab-runner/README.md#parte-5---gerando-o-token-do-runner-e-guardando-no-ssm)** (passo 16) — use o mesmo, só com o token novo (passo 0.3) e o parâmetro `/fiap/gitlab-runner/token`.
+**Passo 0.4. Guarde o token no SSM**
+
+</dt>
+<dd>
+
+No **terminal do Codespaces**, guarde o token no **SSM Parameter Store**, no parâmetro **`/fiap/gitlab-runner/token`** (é dele que o script e o playbook leem, sem segredo em arquivo). Troque o `glrt-COLE-SEU-TOKEN-AQUI` pelo token que você copiou no passo 0.3:
+
+```bash
+aws ssm put-parameter --name /fiap/gitlab-runner/token \
+  --type SecureString --value "glrt-COLE-SEU-TOKEN-AQUI" \
+  --region us-east-1 --overwrite
+```
+
+</dd>
+</dl>
+
+> 📚 **Você já fez exatamente isso no Módulo 02** ao registrar o seu runner; o mesmo comando está na **[Parte 5 do Módulo 02](../02-Ansible/01-provisionando-gitlab-runner/README.md#parte-5---gerando-o-token-do-runner-e-guardando-no-ssm)** (passo 16).
 
 ---
 
 <a id="prep-5"></a>
 
-**Passo 0.5.** Rode o script de provisionamento. Ele instala o tooling, sobe a EC2 do runner e a configura via Ansible — **tudo em um comando** (leva ~5 min):
+<dl>
+<dt>
+
+**Passo 0.5. Rode o script de provisionamento**
+
+</dt>
+<dd>
+
+Ele instala o tooling, sobe a EC2 do runner e a configura via Ansible, **tudo em um comando** (leva ~5 min):
 
 ```bash
 bash /workspaces/FIAP-Platform-Engineering/Trabalho-final/provisionamento/subir-runner.sh
@@ -186,13 +241,16 @@ bash /workspaces/FIAP-Platform-Engineering/Trabalho-final/provisionamento/subir-
 
 Ao terminar, confirme em **Settings → CI/CD → Runners** que o runner aparece **online**.
 
+</dd>
+</dl>
+
 <details>
 <summary><b>💡 Clique para entender: o que o script faz (e por que ele existe)</b></summary>
 <blockquote>
 
-O `subir-runner.sh` reaproveita **o mesmo código do Módulo 02** (o Terraform da EC2 + o playbook Ansible). Ele: descobre seu bucket de state, confirma o token no SSM, prepara o Ansible (venv + `boto3` + collections + `session-manager-plugin`), sobe a EC2 (`terraform apply`) e registra o runner (`ansible-playbook`, conectando via SSM — sem SSH).
+O `subir-runner.sh` reaproveita **o mesmo código do Módulo 02** (o Terraform da EC2 + o playbook Ansible). Ele: descobre seu bucket de state, confirma o token no SSM, prepara o Ansible (venv + `boto3` + collections + `session-manager-plugin`), sobe a EC2 (`terraform apply`) e registra o runner (`ansible-playbook`, conectando via SSM, sem SSH).
 
-Por que entregar isso pronto? Porque **subir o runner não é o que este trabalho avalia** — você já fez isso no Módulo 02. O valor do Trabalho Final está no código que vem a seguir. Automatizar o palco tira fricção do que não gera nota.
+Por que entregar isso pronto? Porque **subir o runner não é o que este trabalho avalia**; você já fez isso no Módulo 02. O valor do Trabalho Final está no código que vem a seguir. Automatizar o palco tira fricção do que não gera nota.
 
 O runner roda numa EC2 com o `LabRole` (instance profile), então o `terraform` do pipeline já terá acesso à AWS **sem** nenhuma credencial no GitLab.
 
@@ -220,13 +278,17 @@ O runner roda numa EC2 com o `LabRole` (instance profile), então o `terraform` 
 
 > [!IMPORTANT]
 > ## ✋ Daqui em diante começa o trabalho que será avaliado
-> A partir da Parte 1, é **você** que desenvolve: o módulo Terraform, os workspaces e o `.gitlab-ci.yml`. O palco (runner) já está pronto — o foco agora é **código e lógica**.
+> A partir da Parte 1, é **você** que desenvolve: o módulo Terraform, os workspaces e o `.gitlab-ci.yml`. O palco (runner) já está pronto; o foco agora é **código e lógica**.
 
-Todo o código do trabalho você cria e roda **na pasta do Trabalho Final**. O script da Parte 0 pode ter deixado você em outro diretório, então entre nela agora — e é daqui que os comandos das próximas partes assumem que você está:
+Você vai desenvolver **dentro do seu repositório** `trabalho-final` (o que você criou na Parte 0). **Clone-o** para o Codespaces e entre na pasta; é daqui que os comandos das próximas partes assumem que você está (troque `<seu-usuario>` pelo seu usuário do GitLab):
 
 ```bash
-cd /workspaces/FIAP-Platform-Engineering/Trabalho-final
+cd /workspaces
+git clone git@gitlab.com:<seu-usuario>/trabalho-final.git
+cd /workspaces/trabalho-final
 ```
+
+**Por que clonar, e não usar a pasta `Trabalho-final/` do curso?** Porque no Requisito 8 você vai dar `git push` para o **seu** projeto no GitLab. Trabalhando já dentro do clone dele, o push é direto, sem mover arquivos entre pastas. A pasta `Trabalho-final/` do repositório do curso guarda só este enunciado e o script da Parte 0; o **código que você desenvolve** vive no seu repositório clonado.
 
 ---
 
@@ -240,20 +302,82 @@ A lógica da demo Count vira um **módulo reutilizável** que recebe a quantidad
 
 <a id="req-1"></a>
 
-**Requisito 1.** Transforme os arquivos da demo Count em um **módulo** que recebe a quantidade de nós atrás do load balancer como uma variável de entrada.
+**Requisito 1 — Transformar a demo Count em um módulo**
 
-> 📚 **Revisar como criar módulo?** Veja a demo **[01.2 - Modules](../01-Terraform/demos/02-Modules/README.md)** (fronteira do módulo, variáveis de entrada, `source`).
+Você vai pegar a infra da demo Count (o ALB + as N EC2 com Nginx) e empacotá-la como um **módulo** que recebe a quantidade de nós por variável. Faça, nesta ordem:
 
-- Crie uma pasta de módulo (ex: `modules/web-cluster/`) com os recursos da demo Count (`aws_instance`, `aws_lb`, `aws_lb_target_group`, `aws_lb_listener`, `aws_security_group`, data sources de VPC/subnet).
-- Declare uma variável de entrada, por exemplo `variable "node_count"`, e use-a no `count` das instâncias.
-- **Exponha o DNS do ALB como `output` do módulo** (a partir de `aws_lb.<seu_alb>.dns_name`). É esse output que o arquivo raiz vai consumir no Requisito 2 — **anote o nome que você deu a ele** (a demo Count usa outros nomes de output; aqui você decide o seu).
-- O módulo **não** deve conter um bloco `backend` nem o `provider "aws"` duplicado — isso fica no arquivo raiz que o chama.
+<dl>
+<dt>
+
+**1.1. Crie a pasta do módulo**
+
+</dt>
+<dd>
+
+Estando em `/workspaces/trabalho-final`:
+
+```bash
+mkdir -p modules/web-cluster
+```
+
+</dd>
+<dt>
+
+**1.2. Copie para dentro dela TODOS os arquivos da demo Count**
+
+</dt>
+<dd>
+
+Todos os `.tf` **e** o `script.sh`, de [`01-Terraform/demos/03-Count`](../01-Terraform/demos/03-Count/README.md). Estando em `/workspaces/trabalho-final`, copie da demo (que fica no repositório do curso):
+
+```bash
+cp /workspaces/FIAP-Platform-Engineering/01-Terraform/demos/03-Count/*.tf \
+   /workspaces/FIAP-Platform-Engineering/01-Terraform/demos/03-Count/script.sh \
+   modules/web-cluster/
+```
+
+Copie tudo, não escolha recursos soltos: os arquivos dependem uns dos outros (além dos recursos óbvios, a demo tem os `data`/`locals` de AMI e subnet, o `aws_lb_target_group_attachment` que liga as EC2 ao ALB e o `terraform_data` que roda o `script.sh` para instalar o Nginx). Você ajusta esse conjunto nos passos seguintes.
+
+</dd>
+<dt>
+
+**1.3. Apague do módulo o que pertence ao raiz**
+
+</dt>
+<dd>
+
+Remova o bloco `backend` e o `provider "aws"`, se vieram junto; eles ficam no arquivo raiz (Requisito 2), nunca no módulo. Já o `versions.tf` (com o `required_providers`) e o `check.tf` (um health-check que verifica se o ALB responde 200 no fim do apply) **podem ficar no módulo**; não precisa mexer neles.
+
+</dd>
+<dt>
+
+**1.4. Parametrize a quantidade de nós**
+
+</dt>
+<dd>
+
+Crie a variável `node_count` e use-a no `count` das instâncias, no lugar do número fixo que a demo tinha.
+
+</dd>
+<dt>
+
+**1.5. Exponha o DNS do ALB como um `output` do módulo**
+
+</dt>
+<dd>
+
+No arquivo **`outputs.tf` do módulo** (ele já veio da demo Count no passo 1.2, é só editá-lo), o ALB é exposto no output `alb_public`. **Renomeie esse output para `alb_dns`** (ele devolve `aws_lb.<seu_alb>.dns_name`); o arquivo raiz vai consumi-lo no Requisito 2, e os comandos de teste (Requisito 8 e Parte 4) usam esse nome. O outro output do arquivo (`address`) pode ficar como está.
+
+</dd>
+</dl>
+
+> 📚 Como criar um módulo (fronteira do módulo, variáveis de entrada, `source`): demo **[01.2 - Modules](../01-Terraform/demos/02-Modules/README.md)**.
 
 <details>
 <summary><b>💡 Clique para entender: por que parametrizar a quantidade de nós</b></summary>
 <blockquote>
 
-Na demo Count o número de instâncias estava fixo (`count = 2`). Um módulo bom é **agnóstico ao ambiente**: a mesma lógica serve para 1 nó em `dev` e 4 em `prod`. Promover o número a variável (`node_count`) transforma o módulo em um contrato — quem chama decide o tamanho, o módulo decide como construir.
+Na demo Count o número de instâncias estava fixo (`count = 2`). Um módulo bom é **agnóstico ao ambiente**: a mesma lógica serve para 1 nó em `dev` e 4 em `prod`. Promover o número a variável (`node_count`) transforma o módulo em um contrato: quem chama decide o tamanho, o módulo decide como construir.
 
 Padrão mental: o módulo é uma "função"; as variáveis são seus parâmetros; os `outputs` são seu retorno.
 
@@ -268,23 +392,80 @@ Documentação oficial:
 
 <a id="req-2"></a>
 
-**Requisito 2.** Crie o **arquivo raiz** que chama o módulo (`source` apontando para a pasta do módulo), passa o `node_count` e expõe o DNS do ALB como `output` do raiz. Pontos que o raiz resolve:
+**Requisito 2 — Criar o arquivo raiz que chama o módulo**
 
-- **Consuma o output do seu módulo pelo nome exato** que você definiu no Requisito 1 (`module.<nome_do_modulo>.<seu_output>`). Se os nomes não baterem, o `terraform validate` acusa `Error: Unsupported attribute ... does not have an attribute named ...`.
-- **`node_count` deriva do workspace** (`dev` = 1, `prod` = 3): use uma expressão condicional sobre `terraform.workspace` no argumento `node_count`. Assim o pipeline não precisa de `-var`/`tfvars` — basta selecionar o workspace.
-- **`provider "aws"` e o `backend`** ficam **no raiz**, nunca no módulo.
+No **arquivo raiz** (na pasta do trabalho, fora de `modules/`) você chama o módulo, diz quantos nós ele deve criar e reexpõe o DNS do ALB. Faça, nesta ordem:
 
-> 📚 Como chamar um módulo, passar variável e expor `output` está na demo [01.2 - Modules](../01-Terraform/demos/02-Modules/README.md); a concatenação com `terraform.workspace`, na demo [01.5 - Workspaces](../01-Terraform/demos/05-Workspaces/README.md).
+<dl>
+<dt>
 
-> [!IMPORTANT]
-> Valide a sintaxe localmente antes de seguir, sem precisar de credenciais:
->
-> ```bash
-> cd /workspaces/FIAP-Platform-Engineering/Trabalho-final
-> terraform init -backend=false
-> terraform fmt -check
-> terraform validate
-> ```
+**2.1. Declare o `provider "aws"` no raiz**
+
+</dt>
+<dd>
+
+Com `region = "us-east-1"` (as variáveis da demo foram para o módulo, então fixe a região aqui). O provider fica no raiz, nunca no módulo; o `backend` você adiciona no Requisito 3, também no raiz.
+
+</dd>
+<dt>
+
+**2.2. Chame o módulo**
+
+</dt>
+<dd>
+
+Use um bloco `module`, apontando `source` para a pasta do módulo (`./modules/web-cluster`).
+
+</dd>
+<dt>
+
+**2.3. Passe o `node_count` derivado do workspace**
+
+</dt>
+<dd>
+
+Use uma expressão condicional sobre `terraform.workspace` (`dev` = 1, `prod` = 3). Assim o pipeline não precisa de `-var` nem `tfvars`; basta selecionar o workspace.
+
+</dd>
+<dt>
+
+**2.4. Reexponha o DNS do ALB como `output` do raiz**
+
+</dt>
+<dd>
+
+Num arquivo **`outputs.tf` na raiz do projeto** (fora de `modules/`), crie um `output` (também chamado **`alb_dns`**) que devolve o output do módulo: `module.<nome_do_modulo>.alb_dns`. É esse `alb_dns` do raiz que o `terraform output -raw alb_dns` lê nos testes da Parte 3 e 4.
+
+</dd>
+<dt>
+
+**2.5. Valide a sintaxe localmente** (sem precisar de credenciais)
+
+</dt>
+<dd>
+
+```bash
+cd /workspaces/trabalho-final
+terraform init -backend=false
+terraform fmt          # formata seus arquivos
+terraform validate
+```
+
+O `terraform fmt` (sem `-check`) **formata** o código; o stage `validar` do pipeline (Requisito 7) roda `terraform fmt -check`, que **reprova** se algum arquivo não estiver formatado. Formatando aqui, o pipeline passa.
+
+</dd>
+</dl>
+
+> 📚 Chamar um módulo, passar variável e expor `output`: demo **[01.2 - Modules](../01-Terraform/demos/02-Modules/README.md)**. A condicional com `terraform.workspace`: demo **[01.5 - Workspaces](../01-Terraform/demos/05-Workspaces/README.md)**.
+
+<details>
+<summary><b>⚠ Se der erro: <code>Unsupported attribute ... does not have an attribute named ...</code></b></summary>
+<blockquote>
+
+O nome do output que você consumiu no raiz (`module.<nome>.<output>`) não bate com o nome que você declarou no módulo (Requisito 1, passo 1.5). Abra os dois arquivos e deixe os nomes **idênticos**.
+
+</blockquote>
+</details>
 
 ### Checkpoint
 
@@ -304,16 +485,63 @@ O state vive no S3 e existem dois ambientes (`dev` e `prod`) com recursos nomead
 
 <a id="req-3"></a>
 
-**Requisito 3.** Configure o **estado remoto no S3** no arquivo raiz, usando:
+**Requisito 3 — Mover o estado para o S3**
+
+O `terraform.tfstate` sai da sua máquina e passa a viver no S3, para o pipeline e o time compartilharem o mesmo estado. Faça, nesta ordem:
+
+<dl>
+<dt>
+
+**3.1. Crie o `backend.tf` na raiz**
+
+</dt>
+<dd>
+
+Um arquivo `backend.tf` na raiz do projeto, com um bloco `backend "s3"` e estes três valores:
 
 - **bucket**: o seu `base-config-<SEU-RM>` (o mesmo do setup, Módulo 01);
 - **key**: exatamente **`trabalho-final/terraform.tfstate`**;
 - **region**: `us-east-1`.
 
-> 📚 O bloco `backend "s3"` (com `bucket`, `key`, `region`) e o `terraform init` migrando o state estão na demo **[01.4 - State](../01-Terraform/demos/04-State/README.md)** — use-a como referência para escrever o seu.
+</dd>
+<dt>
+
+**3.2. Rode `terraform init`**
+
+</dt>
+<dd>
+
+Ele migra o state para o S3.
+
+</dd>
+<dt>
+
+**3.3. Crie o `.gitignore`**
+
+</dt>
+<dd>
+
+Antes do primeiro `push` (Requisito 8), garanta que o `.terraform/`, o state e artefatos locais **não** vão para o Git. Na raiz do projeto:
+
+```bash
+cat > .gitignore <<'EOF'
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+build/
+plan.tfplan
+checkov-report.xml
+EOF
+```
+
+</dd>
+</dl>
+
+> 📚 O bloco `backend "s3"` e o `terraform init` migrando o state estão na demo **[01.4 - State](../01-Terraform/demos/04-State/README.md)** — use-a como referência para escrever o seu.
 
 > [!CAUTION]
-> Nomes de bucket S3 **não podem ter espaços** nem maiúsculas e são globais. **Não** versione `terraform.tfstate` no Git — adicione-o ao `.gitignore`.
+> Nomes de bucket S3 **não podem ter espaços** nem maiúsculas e são globais. **Não** versione `terraform.tfstate` no Git; adicione-o ao `.gitignore`.
 
 <details>
 <summary><b>⚠ Se der erro: <code>Error: Failed to get existing workspaces: S3 bucket does not exist</code></b></summary>
@@ -325,7 +553,7 @@ O bucket precisa existir **antes** do `terraform init`. Crie-o uma vez:
 aws s3 mb s3://base-config-<SEU-RM> --region us-east-1
 ```
 
-Depois rode `terraform init` novamente — ele migra o state para o S3.
+Depois rode `terraform init` novamente; ele migra o state para o S3.
 
 </blockquote>
 </details>
@@ -334,39 +562,84 @@ Depois rode `terraform init` novamente — ele migra o state para o S3.
 
 <a id="req-4"></a>
 
-**Requisito 4.** Faça com que os **nomes das máquinas** (a tag `Name` das `aws_instance` do módulo) sigam o **workspace** atual, concatenando a variável **`${terraform.workspace}`** no nome. Exemplo do resultado: `nginx-prod-002`, `nginx-dev-001`.
+**Requisito 4 — Nomear as máquinas por workspace**
 
-> 📚 O padrão de concatenar `${terraform.workspace}` no nome do recurso está na demo **[01.5 - Workspaces](../01-Terraform/demos/05-Workspaces/README.md)** — veja lá como fica e replique na tag `Name` das instâncias (o `count.index` já vem da demo Count).
+<dl>
+<dt>
+
+**4.1. Concatene o workspace no nome das máquinas**
+
+</dt>
+<dd>
+
+Na tag `Name` das `aws_instance` (dentro do módulo), inclua **`${terraform.workspace}`**. O resultado deve ficar assim: `nginx-prod-002`, `nginx-dev-001` (o `count.index` que gera o `002` já vem da demo Count).
+
+</dd>
+</dl>
+
+> 📚 O padrão de concatenar `${terraform.workspace}` no nome do recurso está na demo **[01.5 - Workspaces](../01-Terraform/demos/05-Workspaces/README.md)**.
 
 ---
 
 <a id="req-5"></a>
 
-**Requisito 5.** Faça com que os nomes do **ALB** (`aws_lb`), do **Target Group** (`aws_lb_target_group`) e do **Security Group** do módulo também contenham o workspace (ex: `alb-prod`, `tg-prod`, `vortex-sg-prod`).
+**Requisito 5 — Nomear ALB, Target Group e Security Group por workspace**
 
-> [!NOTE]
-> O nome de um `aws_lb` (ALB) e de um `aws_lb_target_group` aceita no máximo 32 caracteres e só letras, números e hífens. Mantenha curto: `alb-${terraform.workspace}` e `tg-${terraform.workspace}` são suficientes.
+<dl>
+<dt>
+
+**5.1. Concatene o workspace no nome do ALB, do Target Group e do Security Group**
+
+</dt>
+<dd>
+
+Inclua `${terraform.workspace}` no nome do **ALB** (`aws_lb`), do **Target Group** (`aws_lb_target_group`) e do **Security Group** do módulo (ex: `alb-prod`, `tg-prod`, `vortex-sg-prod`).
+
+</dd>
+</dl>
+
+O nome de um `aws_lb` (ALB) e de um `aws_lb_target_group` aceita no máximo 32 caracteres e só letras, números e hífens; mantenha curto (`alb-${terraform.workspace}`, `tg-${terraform.workspace}`).
 
 > [!CAUTION]
-> O **nome do Security Group não pode começar com `sg-`** — a AWS reserva esse prefixo para os IDs (`sg-01ab...`) e recusa com `invalid value for name (cannot begin with sg-)`. Use um prefixo próprio, ex: `vortex-sg-${terraform.workspace}` (vira `vortex-sg-prod`). Descrições de Security Group também devem ser ASCII, sem acentos.
+> O **nome do Security Group não pode começar com `sg-`**: a AWS reserva esse prefixo para os IDs (`sg-01ab...`) e recusa com `invalid value for name (cannot begin with sg-)`. Use um prefixo próprio, ex: `vortex-sg-${terraform.workspace}` (vira `vortex-sg-prod`). Descrições de Security Group também devem ser ASCII, sem acentos.
 
 ---
 
 <a id="req-6"></a>
 
-**Requisito 6.** Crie um ambiente de **dev** e um de **prod** usando workspaces, com alguma diferença real entre eles (ex: `dev` com 1 nó, `prod` com 3).
+**Requisito 6 — Criar os ambientes dev e prod (workspaces)**
 
-> 📚 A demo **[01.5 - Workspaces](../01-Terraform/demos/05-Workspaces/README.md)** mostra `terraform workspace new/select/list` e como um mesmo código gera ambientes isolados.
+<dl>
+<dt>
+
+**6.1. Crie os dois workspaces e liste para conferir**
+
+</dt>
+<dd>
 
 ```bash
-cd /workspaces/FIAP-Platform-Engineering/Trabalho-final
+cd /workspaces/trabalho-final
 terraform workspace new dev
 terraform workspace new prod
 terraform workspace list
 ```
 
-> [!TIP]
-> Use a flag `-auto-approve` para evitar o "type 'yes' to confirm" em todos os `apply`/`destroy` deste trabalho — não ensina nada novo e tira fricção. A diferença entre os ambientes (`dev` = 1 nó, `prod` = 3) vem da **condicional sobre `terraform.workspace`** que você colocou no arquivo raiz (Requisito 2) — então basta selecionar o workspace (`terraform workspace select prod`) e aplicar; nada de `-var` ou `tfvars`.
+</dd>
+<dt>
+
+**6.2. Confirme que os ambientes se diferenciam de verdade**
+
+</dt>
+<dd>
+
+`dev` = 1 nó, `prod` = 3. Você **não** precisa configurar nada novo aqui: essa diferença já vem da condicional sobre `terraform.workspace` que você escreveu no arquivo raiz (Requisito 2, passo 2.3). Basta selecionar o workspace (`terraform workspace select prod`) e aplicar; nada de `-var` ou `tfvars`.
+
+</dd>
+</dl>
+
+> 📚 A demo **[01.5 - Workspaces](../01-Terraform/demos/05-Workspaces/README.md)** mostra `terraform workspace new/select/list` e como um mesmo código gera ambientes isolados.
+
+Use a flag `-auto-approve` nos `apply`/`destroy` deste trabalho para pular o "type 'yes' to confirm"; não ensina nada novo e tira fricção.
 
 ### Checkpoint
 
@@ -387,23 +660,23 @@ Um repositório no GitLab roda um pipeline de 3 etapas no seu Runner próprio, d
 
 <a id="req-7"></a>
 
-**Requisito 7.** Suba **somente** o código deste trabalho (módulo + raiz + `.gitlab-ci.yml`) para o **projeto que você criou na Parte 0** (passo 0.1). O pipeline vai rodar no **runner que você provisionou na Parte 0** — que já está online e autentica na AWS pelo **`LabRole` (instance profile da EC2)**. Ou seja, **você não configura credencial AWS nenhuma no GitLab**, igual ao [Módulo 03](../03-CICD/01-Primeiro-pipeline/README.md).
+**Requisito 7 — Escrever o pipeline de 3 etapas**
 
-> [!IMPORTANT]
-> Confirme que o runner da Parte 0 está **online** em Settings → CI/CD → Runners. Como ele roda numa EC2 com o `LabRole`, o `terraform` no pipeline já tem acesso à AWS — sem `AWS_ACCESS_KEY_ID`/`SECRET` no repositório. Isso também evita o problema das credenciais do Academy, que são temporárias e expiram.
+<dl>
+<dt>
 
-> [!CAUTION]
-> **Nunca** faça commit do `terraform.tfstate` nem de segredos. Confira o `.gitignore` antes do primeiro push.
+**7.1. Crie o arquivo `.gitlab-ci.yml` na raiz do projeto**
 
----
+</dt>
+<dd>
 
-<a id="req-8"></a>
+Ele terá **3 stages** que rodam no seu runner próprio (Parte 0) e provisionam **um** ambiente (o do workspace escolhido, no exemplo `prod`):
 
-**Requisito 8.** Adicione um **pipeline de 3 etapas** (`stages`) que roda no seu **GitLab Runner próprio** (Parte 0). É o **mesmo padrão** dos labs de CI/CD — reaproveite o [Lab 03.1](../03-CICD/01-Primeiro-pipeline/README.md) (estrutura `plan`/`apply` + artefato) e o [Lab 03.2](../03-CICD/02-Validando-e-gerando-relatorios/README.md) (gate com Checkov + relatório JUnit). O pipeline provisiona **um** ambiente (o do workspace escolhido — no exemplo, `prod`):
+- **validar** — `terraform fmt -check`, `terraform init`, `terraform validate`;
+- **revisar/gate** — seleciona o workspace, gera o `terraform plan` (artefato para o próximo stage) e roda o **Checkov** (igual ao Lab 03.2), publicando o relatório **JUnit** na aba **Tests**;
+- **aplicar** — `terraform apply` do plano gerado, no mesmo workspace, deixando as EC2s no ar.
 
-1. **validar** — `terraform fmt -check`, `terraform init`, `terraform validate`;
-2. **revisar/gate** — seleciona o workspace, gera o `terraform plan` (artefato para o próximo stage) e roda o **Checkov** (igual ao Lab 03.2), publicando o relatório **JUnit** na aba **Tests**;
-3. **aplicar** — `terraform apply` do plano gerado, no mesmo workspace, deixando as EC2s no ar.
+É o **mesmo padrão** dos labs de CI/CD; reaproveite o [Lab 03.1](../03-CICD/01-Primeiro-pipeline/README.md) (estrutura `plan`/`apply` + artefato) e o [Lab 03.2](../03-CICD/02-Validando-e-gerando-relatorios/README.md) (gate com Checkov + relatório JUnit). Use o esqueleto abaixo e adapte ao seu projeto:
 
 ```yaml
 # .gitlab-ci.yml (esqueleto — adapte ao seu projeto)
@@ -450,13 +723,18 @@ aplicar:
   tags: [shell]
 ```
 
+</dd>
+</dl>
+
+O `source /opt/venv/bin/activate` funciona porque o **runner da Parte 0 já vem com o Checkov instalado** nesse venv (o playbook do Módulo 02 o instala em `/opt/venv`); você não instala nada, só ativa o ambiente antes de chamar o `checkov`, como no [Lab 03.2](../03-CICD/02-Validando-e-gerando-relatorios/README.md).
+
 <details>
 <summary><b>💡 Clique para entender: o gate, o workspace no CI e "reportar vs barrar"</b></summary>
 <blockquote>
 
-**Por que o gate vem antes do apply:** validar e revisar são baratos; aplicar cria recursos reais. Rodar o Checkov antes deixa a análise de segurança visível (aba **Tests**) **antes** de qualquer mudança chegar à nuvem — "falhe cedo, falhe pequeno".
+**Por que o gate vem antes do apply:** validar e revisar são baratos; aplicar cria recursos reais. Rodar o Checkov antes deixa a análise de segurança visível (aba **Tests**) **antes** de qualquer mudança chegar à nuvem: "falhe cedo, falhe pequeno".
 
-**Reportar vs. barrar:** como no [Lab 03.2](../03-CICD/02-Validando-e-gerando-relatorios/README.md), usamos `|| true` para o Checkov **reportar sem abortar** o job — a infra da demo Count tem findings genéricos (SG aberto na 80, sem criptografia) que são **esperados**. Transformar o gate em bloqueio de verdade (remover o `|| true`, ou barrar só findings críticos) é uma **decisão sua**.
+**Reportar vs. barrar:** como no [Lab 03.2](../03-CICD/02-Validando-e-gerando-relatorios/README.md), usamos `|| true` para o Checkov **reportar sem abortar** o job: a infra da demo Count tem findings genéricos (SG aberto na 80, sem criptografia) que são **esperados**. Transformar o gate em bloqueio de verdade (remover o `|| true`, ou barrar só findings críticos) é uma **decisão sua**.
 
 **Workspace no CI:** este é o ponto de integração novo (workspaces do [Lab 01.5](../01-Terraform/demos/05-Workspaces/README.md) dentro do pipeline do Módulo 03). O `terraform workspace select "$WORKSPACE" || terraform workspace new "$WORKSPACE"` garante que o `plan`/`apply` rodem no ambiente certo. Como cada stage roda num job separado, o `select` é repetido no `aplicar`.
 
@@ -467,16 +745,49 @@ Documentação oficial:
 </blockquote>
 </details>
 
+---
+
+<a id="req-8"></a>
+
+**Requisito 8 — Subir o código e disparar o pipeline**
+
+<dl>
+<dt>
+
+**8.1. Faça o `git push` do seu código**
+
+</dt>
+<dd>
+
+Você desenvolveu tudo dentro do clone do seu repositório (`/workspaces/trabalho-final`), então subir é um `git push`. O `.gitignore` do passo 3.3 já barra `.terraform/`, state e artefatos, vai só o código (módulo + raiz + `.gitlab-ci.yml`). O `push` **dispara o pipeline** automaticamente, no **runner da Parte 0**, igual ao [Módulo 03](../03-CICD/01-Primeiro-pipeline/README.md).
+
+```bash
+cd /workspaces/trabalho-final
+terraform fmt          # formata TUDO antes de subir (o stage 'validar' roda 'fmt -check' e reprova se faltar)
+git add .
+git commit -m "trabalho final: modulo, workspaces e pipeline"
+git push -u origin HEAD
+```
+
+</dd>
+</dl>
+
+> [!IMPORTANT]
+> Confirme que o runner da Parte 0 está **online** em Settings → CI/CD → Runners. Como ele roda numa EC2 com o `LabRole`, o `terraform` no pipeline já tem acesso à AWS, sem `AWS_ACCESS_KEY_ID`/`SECRET` no repositório. Isso também evita o problema das credenciais do Academy, que são temporárias e expiram.
+
+> [!CAUTION]
+> **Nunca** faça commit do `terraform.tfstate` nem de segredos. Confira o `.gitignore` antes do primeiro push.
+
 <details>
 <summary><b>⚠ Se der erro: pipeline fica em <code>pending</code> e nunca roda</b></summary>
 <blockquote>
 
-O job está esperando um Runner. Verifique em **Settings → CI/CD → Runners** se o Runner do Módulo 02 está **online** e habilitado para este projeto. Se ele tiver tags, o job precisa ter as mesmas tags (ou desmarque "Run untagged jobs").
+O job está esperando um Runner. Verifique em **Settings → CI/CD → Runners** se o **runner da Parte 0** está **online** e habilitado para este projeto. Se ele tiver tags, o job precisa ter as mesmas tags (ou desmarque "Run untagged jobs").
 
 </blockquote>
 </details>
 
-Quando o pipeline terminar, é aqui que você tira **os prints que vão na entrega** (Parte 4) — eles são a prova de que o CI/CD rodou de verdade:
+Quando o pipeline terminar, é aqui que você tira **os prints que vão na entrega** (Parte 4); eles são a prova de que o CI/CD rodou de verdade:
 
 > 📸 **Print obrigatório** — salve como `prints/01-pipeline-verde.png`. Capture a página do pipeline no GitLab com os **3 stages verdes** (`validar → revisar → aplicar`), rodando no seu runner.
 
@@ -504,7 +815,9 @@ Um `.zip` com **todo o Terraform que você desenvolveu** (do jeito que você org
 
 <a id="req-9"></a>
 
-**Requisito 9.** A entrega é **código + prints**. O **código** que você escreveu já é a prova do que você fez (módulo, workspaces, backend) — por isso **não pedimos print do código**. O que o código *não* mostra é que o **pipeline rodou de verdade na nuvem** — e é isso que os prints provam.
+**Requisito 9 — Empacotar e submeter**
+
+A entrega é **código + prints**. O **código** que você escreveu já é a prova do que você fez (módulo, workspaces, backend); por isso **não pedimos print do código**. O que o código *não* mostra é que o **pipeline rodou de verdade na nuvem**, e é isso que os prints provam.
 
 #### O que entra no zip
 
@@ -512,14 +825,15 @@ Todo o código do trabalho, **na estrutura em que você o desenvolveu** — algo
 
 ```text
 trabalho-final/
-├── main.tf                 # raiz: provider + chamada do modulo + output
+├── main.tf                 # raiz: provider + chamada do modulo (node_count por workspace)
+├── outputs.tf              # raiz: output alb_dns (reexpoe o do modulo)
 ├── backend.tf              # state remoto no S3
-├── versions.tf
 ├── .gitlab-ci.yml          # pipeline de 3 stages
+├── .gitignore
 ├── modules/
 │   └── web-cluster/        # o modulo que voce criou a partir da demo Count
-│       ├── main.tf · variables.tf · data.tf · outputs.tf · script.sh
-└── prints/                 # as evidencias de que o pipeline rodou (abaixo)
+│       ├── main.tf · securitygroup.tf · variables.tf · versions.tf · outputs.tf · check.tf · script.sh
+└── prints/                 # as evidencias de que o pipeline rodou (adicionadas na sua maquina, passo 9.2)
     ├── 01-pipeline-verde.png
     ├── 02-tests-checkov.png
     └── 03-api-no-ar.png
@@ -537,38 +851,77 @@ Você **não desenvolve nada de CI/CD além do `.gitlab-ci.yml`**, mas precisa *
 
 Suas coisas ficam em **dois lugares**: o **código** está no Codespaces (nuvem); os **prints** são `.png` na **sua máquina** (você os salvou com print de tela). Por isso:
 
-**Parte A — no Codespaces:** empacote só o código, sem os artefatos pesados/locais (`.terraform/`, state, `build/`, `plan.tfplan`):
+<dl>
+<dt>
+
+**9.1. No Codespaces, empacote só o código**
+
+</dt>
+<dd>
+
+Sem os artefatos pesados/locais (`.terraform/`, state, `build/`, `plan.tfplan`):
 
 ```bash
-cd /workspaces/FIAP-Platform-Engineering/Trabalho-final
+cd /workspaces/trabalho-final
 zip -r trabalho-final-<SEU-RM>.zip . \
-  -x '*/.terraform/*' -x '*.tfstate*' -x '*.terraform.lock.hcl' \
-  -x '*/build/*' -x 'plan.tfplan' -x '*/.git/*'
+  -x '.terraform/*' -x '*/.terraform/*' \
+  -x '*.tfstate*' -x '*.terraform.lock.hcl' \
+  -x 'build/*' -x '*/build/*' \
+  -x 'plan.tfplan' \
+  -x '.git/*' -x '*/.git/*'
 ```
 
-No painel de arquivos do Codespaces, clique com o botão direito em `trabalho-final-<SEU-RM>.zip` → **Download**.
+Precisa dos padrões com **e** sem `*/`: o `.terraform/` (e o `build/`) ficam na **raiz** do projeto, e `*/.terraform/*` só casaria os de subpasta. Confira o que entrou com `unzip -l trabalho-final-<SEU-RM>.zip`; se já tinha gerado um zip com o `.terraform` dentro, apague-o e rode de novo.
 
-**Parte B — na sua máquina:** descompacte o zip baixado, crie uma pasta `prints/` dentro dele, mova para lá os **3 prints** e recompacte. O `trabalho-final-<SEU-RM>.zip` final (código + `prints/`) é o que você entrega.
+Para baixar: no explorer do Codespaces, abra a pasta do seu projeto (**File → Open Folder → `/workspaces/trabalho-final`** se ela ainda não estiver visível), clique com o botão direito em `trabalho-final-<SEU-RM>.zip` → **Download**.
+
+</dd>
+<dt>
+
+**9.2. Na sua máquina, junte os prints e recompacte**
+
+</dt>
+<dd>
+
+Descompacte o zip baixado, crie uma pasta `prints/` dentro dele, mova para lá os **3 prints** e recompacte. O `trabalho-final-<SEU-RM>.zip` final (código + `prints/`) é o que você entrega.
+
+</dd>
+</dl>
 
 #### Submissão
+
+<dl>
+<dt>
+
+**9.3. Envie no canal indicado pelo professor**
+
+</dt>
+<dd>
+
+(Portal da FIAP / comunicado da turma), com:
 
 - [ ] `trabalho-final-<SEU-RM>.zip` (código + `.gitlab-ci.yml` + `prints/`)
 - [ ] **Link do repositório GitLab** (cole no campo de texto da entrega)
 - [ ] Os **3 prints** dentro de `prints/`
 
-Envie no canal indicado pelo professor (portal da FIAP / comunicado da turma).
+</dd>
+</dl>
 
 > [!CAUTION]
-> **Destrua a infraestrutura ao terminar** — este é o fim do arco, então derrube **tudo**: a infra do trabalho (EC2 + ALB em `dev` e `prod`) **e** o runner da Parte 0. Deixar ligado consome o orçamento do Learner Lab. Como a entrega é código + prints, **nada se perde** ao destruir.
+> **Destrua a infraestrutura ao terminar**: este é o fim do arco, então derrube **tudo**: a infra do trabalho (EC2 + ALB em `dev` e `prod`) **e** o runner da Parte 0. Deixar ligado consome o orçamento do Learner Lab. Como a entrega é código + prints, **nada se perde** ao destruir.
 >
 > ```bash
-> # 1) infra do trabalho, nos dois ambientes
-> cd /workspaces/FIAP-Platform-Engineering/Trabalho-final
+> # 1) infra do trabalho, nos dois ambientes (o backend.tf do clone ja tem o seu bucket)
+> cd /workspaces/trabalho-final
+> terraform init
 > terraform workspace select dev  && terraform destroy -auto-approve
 > terraform workspace select prod && terraform destroy -auto-approve
 >
-> # 2) o runner da Parte 0 (a EC2 provisionada pelo script)
+> # 2) o runner da Parte 0 (a EC2 provisionada pelo script). O state.tf do runner usa
+> #    um bucket placeholder; o bucket real entra via -backend-config (igual ao script).
 > cd /workspaces/FIAP-Platform-Engineering/02-Ansible/01-provisionando-gitlab-runner/terraform-gitlab-runner
+> BUCKET=$(aws s3 ls | awk '{print $3}' | grep '^base-config' | head -1)
+> terraform init -reconfigure -backend-config="bucket=$BUCKET"
 > terraform destroy -auto-approve
 > ```
 
@@ -583,14 +936,14 @@ Envie no canal indicado pelo professor (portal da FIAP / comunicado da turma).
 
 ## Conclusão
 
-Se você chegou até aqui, então construiu — em um único projeto — a resposta à pergunta que perseguiu a Vortex o ano inteiro:
+Se você chegou até aqui, então construiu, em um único projeto, a resposta à pergunta que perseguiu a Vortex o ano inteiro:
 
 - modularizou a demo Count em um módulo parametrizável;
 - moveu o state para o S3, viabilizando trabalho em time;
 - separou `dev` e `prod` com recursos nomeados por workspace;
-- montou um pipeline de 3 etapas que valida, barra o inseguro e aplica — tudo no seu Runner.
+- montou um pipeline de 3 etapas que valida, barra o inseguro e aplica, tudo no seu Runner.
 
-**Mensagem para Helena**: *"A infraestrutura da Vortex hoje é código versionado. Um `push` na branch principal valida, revisa e provisiona tudo do zero — de forma confiável e auditável. A resposta para o board é: não são mais dias na mão, é um push."*
+**Mensagem para Helena**: *"A infraestrutura da Vortex hoje é código versionado. Um `push` na branch principal valida, revisa e provisiona tudo do zero, de forma confiável e auditável. A resposta para o board é: não são mais dias na mão, é um push."*
 
 ---
 
@@ -626,10 +979,10 @@ Se você chegou até aqui, então construiu — em um único projeto — a respo
 <summary><b>💡 Como pedir ajuda se travou</b></summary>
 <blockquote>
 
-Antes de abrir issue/perguntar, colete estas 4 informações — elas reduzem o tempo de resposta em 10×:
+Antes de abrir issue/perguntar, colete estas 4 informações: elas reduzem o tempo de resposta em 10×:
 
-1. **Em que requisito você está** (ex: "Requisito 8, etapa `revisar` do pipeline")
-2. **Mensagem de erro literal** (copia-cola completo do log do job no GitLab, não screenshot — texto é pesquisável)
+1. **Em que requisito você está** (ex: "Requisito 7, etapa `revisar` do pipeline")
+2. **Mensagem de erro literal** (copia-cola completo do log do job no GitLab, não screenshot, texto é pesquisável)
 3. **Saída de** `terraform workspace list` **e** `terraform validate` (mostra o estado real do projeto)
 4. **O que você já tentou**
 

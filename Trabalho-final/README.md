@@ -244,15 +244,25 @@ A lógica da demo Count vira um **módulo reutilizável** que recebe a quantidad
 
 Você vai pegar a infra da demo Count (o ALB + as N EC2 com Nginx) e empacotá-la como um **módulo** que recebe a quantidade de nós por variável. Faça, nesta ordem:
 
-**1.1.** Crie a pasta `modules/web-cluster/`.
+**1.1. Crie a pasta do módulo**
 
-**1.2.** **Copie para dentro dela TODOS os arquivos da demo Count** ([`01-Terraform/demos/03-Count`](../01-Terraform/demos/03-Count/README.md)): todos os `.tf` **e** o `script.sh`. Copie tudo — não escolha recursos soltos: os arquivos dependem uns dos outros (além do `aws_instance`, `aws_lb`, `aws_lb_target_group`, `aws_lb_listener` e `aws_security_group`, a demo tem os `data`/`locals` de AMI e subnet, o `aws_lb_target_group_attachment` que liga as EC2 ao ALB e o `terraform_data` que roda o `script.sh` para instalar o Nginx). Nos passos seguintes você ajusta esse conjunto.
+A pasta é `modules/web-cluster/`.
 
-**1.3.** No módulo, **apague** o bloco `backend` e o `provider "aws"`, se vieram junto — eles ficam no arquivo raiz (Requisito 2), nunca no módulo.
+**1.2. Copie para dentro dela TODOS os arquivos da demo Count**
 
-**1.4.** Crie a variável `node_count` e use-a no `count` das instâncias, no lugar do número fixo que a demo tinha.
+Todos os `.tf` **e** o `script.sh`, de [`01-Terraform/demos/03-Count`](../01-Terraform/demos/03-Count/README.md). Copie tudo — não escolha recursos soltos: os arquivos dependem uns dos outros (além dos recursos óbvios, a demo tem os `data`/`locals` de AMI e subnet, o `aws_lb_target_group_attachment` que liga as EC2 ao ALB e o `terraform_data` que roda o `script.sh` para instalar o Nginx). Você ajusta esse conjunto nos passos seguintes.
 
-**1.5.** Exponha o **DNS do ALB** como `output` do módulo (a partir de `aws_lb.<seu_alb>.dns_name`). **Dê a esse output o nome `alb_dns`** — o arquivo raiz vai consumi-lo no Requisito 2, e os comandos de teste (Requisito 8 e Parte 4) usam esse nome. (A demo Count expõe o ALB com outro nome de output; aqui padronizamos como `alb_dns`.)
+**1.3. Apague do módulo o que pertence ao raiz**
+
+Remova o bloco `backend` e o `provider "aws"`, se vieram junto — eles ficam no arquivo raiz (Requisito 2), nunca no módulo.
+
+**1.4. Parametrize a quantidade de nós**
+
+Crie a variável `node_count` e use-a no `count` das instâncias, no lugar do número fixo que a demo tinha.
+
+**1.5. Exponha o DNS do ALB como um `output`**
+
+A partir de `aws_lb.<seu_alb>.dns_name`. **Dê a esse output o nome `alb_dns`** — o arquivo raiz vai consumi-lo no Requisito 2, e os comandos de teste (Requisito 8 e Parte 4) usam esse nome. (A demo Count usa outro nome; aqui padronizamos como `alb_dns`.)
 
 > 📚 Como criar um módulo (fronteira do módulo, variáveis de entrada, `source`): demo **[01.2 - Modules](../01-Terraform/demos/02-Modules/README.md)**.
 
@@ -279,15 +289,23 @@ Documentação oficial:
 
 No **arquivo raiz** (na pasta do trabalho, fora de `modules/`) você chama o módulo, diz quantos nós ele deve criar e reexpõe o DNS do ALB. Faça, nesta ordem:
 
-**2.1.** Declare o `provider "aws"` no arquivo raiz, com `region = "us-east-1"` (as variáveis da demo foram para o módulo, então fixe a região aqui). Ele fica no raiz, nunca no módulo; o `backend` você adiciona no Requisito 3, também no raiz.
+**2.1. Declare o `provider "aws"` no raiz**
 
-**2.2.** Chame o módulo com um bloco `module`, apontando `source` para a pasta do módulo (`./modules/web-cluster`).
+Com `region = "us-east-1"` (as variáveis da demo foram para o módulo, então fixe a região aqui). O provider fica no raiz, nunca no módulo; o `backend` você adiciona no Requisito 3, também no raiz.
 
-**2.3.** Passe o `node_count` **derivado do workspace**: use uma expressão condicional sobre `terraform.workspace` (`dev` = 1, `prod` = 3). Assim o pipeline não precisa de `-var` nem `tfvars` — basta selecionar o workspace.
+**2.2. Chame o módulo**
 
-**2.4.** Crie um `output` no raiz — também chamado **`alb_dns`** — que reexponha o DNS do ALB, consumindo o output do módulo: `module.<nome_do_modulo>.alb_dns`. (É esse `alb_dns` do raiz que o `terraform output -raw alb_dns` lê nos testes da Parte 3 e 4.)
+Use um bloco `module`, apontando `source` para a pasta do módulo (`./modules/web-cluster`).
 
-**2.5.** Valide a sintaxe localmente, sem precisar de credenciais:
+**2.3. Passe o `node_count` derivado do workspace**
+
+Use uma expressão condicional sobre `terraform.workspace` (`dev` = 1, `prod` = 3). Assim o pipeline não precisa de `-var` nem `tfvars` — basta selecionar o workspace.
+
+**2.4. Reexponha o DNS do ALB como `output` do raiz**
+
+Chame-o também de **`alb_dns`** e consuma o output do módulo: `module.<nome_do_modulo>.alb_dns`. É esse `alb_dns` do raiz que o `terraform output -raw alb_dns` lê nos testes da Parte 3 e 4.
+
+**2.5. Valide a sintaxe localmente** (sem precisar de credenciais):
 
 ```bash
 cd /workspaces/FIAP-Platform-Engineering/Trabalho-final
@@ -329,13 +347,17 @@ O state vive no S3 e existem dois ambientes (`dev` e `prod`) com recursos nomead
 
 O `terraform.tfstate` sai da sua máquina e passa a viver no S3, para o pipeline e o time compartilharem o mesmo estado. Faça, nesta ordem:
 
-**3.1.** No arquivo raiz, adicione um bloco `backend "s3"` com estes três valores:
+**3.1. Adicione o bloco `backend "s3"` no arquivo raiz**
+
+Com estes três valores:
 
 - **bucket**: o seu `base-config-<SEU-RM>` (o mesmo do setup, Módulo 01);
 - **key**: exatamente **`trabalho-final/terraform.tfstate`**;
 - **region**: `us-east-1`.
 
-**3.2.** Rode `terraform init` — ele migra o state para o S3.
+**3.2. Rode `terraform init`**
+
+Ele migra o state para o S3.
 
 > 📚 O bloco `backend "s3"` e o `terraform init` migrando o state estão na demo **[01.4 - State](../01-Terraform/demos/04-State/README.md)** — use-a como referência para escrever o seu.
 
@@ -363,7 +385,9 @@ Depois rode `terraform init` novamente — ele migra o state para o S3.
 
 **Requisito 4 — Nomear as máquinas por workspace**
 
-**4.1.** Na tag `Name` das `aws_instance` (dentro do módulo), concatene **`${terraform.workspace}`** no nome. O resultado deve ficar assim: `nginx-prod-002`, `nginx-dev-001` (o `count.index` que gera o `002` já vem da demo Count).
+**4.1. Concatene o workspace no nome das máquinas**
+
+Na tag `Name` das `aws_instance` (dentro do módulo), inclua **`${terraform.workspace}`**. O resultado deve ficar assim: `nginx-prod-002`, `nginx-dev-001` (o `count.index` que gera o `002` já vem da demo Count).
 
 > 📚 O padrão de concatenar `${terraform.workspace}` no nome do recurso está na demo **[01.5 - Workspaces](../01-Terraform/demos/05-Workspaces/README.md)**.
 
@@ -373,7 +397,9 @@ Depois rode `terraform init` novamente — ele migra o state para o S3.
 
 **Requisito 5 — Nomear ALB, Target Group e Security Group por workspace**
 
-**5.1.** Inclua o workspace também no nome do **ALB** (`aws_lb`), do **Target Group** (`aws_lb_target_group`) e do **Security Group** do módulo — ex: `alb-prod`, `tg-prod`, `vortex-sg-prod`.
+**5.1. Concatene o workspace no nome do ALB, do Target Group e do Security Group**
+
+Inclua `${terraform.workspace}` no nome do **ALB** (`aws_lb`), do **Target Group** (`aws_lb_target_group`) e do **Security Group** do módulo — ex: `alb-prod`, `tg-prod`, `vortex-sg-prod`.
 
 > [!NOTE]
 > O nome de um `aws_lb` (ALB) e de um `aws_lb_target_group` aceita no máximo 32 caracteres e só letras, números e hífens. Mantenha curto: `alb-${terraform.workspace}` e `tg-${terraform.workspace}` são suficientes.
@@ -387,7 +413,7 @@ Depois rode `terraform init` novamente — ele migra o state para o S3.
 
 **Requisito 6 — Criar os ambientes dev e prod (workspaces)**
 
-**6.1.** Crie os dois workspaces e liste para conferir:
+**6.1. Crie os dois workspaces e liste para conferir**
 
 ```bash
 cd /workspaces/FIAP-Platform-Engineering/Trabalho-final
@@ -396,7 +422,9 @@ terraform workspace new prod
 terraform workspace list
 ```
 
-**6.2.** Confirme que os ambientes se diferenciam de verdade (`dev` = 1 nó, `prod` = 3). Você **não** precisa configurar nada novo aqui: essa diferença já vem da condicional sobre `terraform.workspace` que você escreveu no arquivo raiz (Requisito 2, passo 2.3). Basta selecionar o workspace (`terraform workspace select prod`) e aplicar — nada de `-var` ou `tfvars`.
+**6.2. Confirme que os ambientes se diferenciam de verdade**
+
+`dev` = 1 nó, `prod` = 3. Você **não** precisa configurar nada novo aqui: essa diferença já vem da condicional sobre `terraform.workspace` que você escreveu no arquivo raiz (Requisito 2, passo 2.3). Basta selecionar o workspace (`terraform workspace select prod`) e aplicar — nada de `-var` ou `tfvars`.
 
 > 📚 A demo **[01.5 - Workspaces](../01-Terraform/demos/05-Workspaces/README.md)** mostra `terraform workspace new/select/list` e como um mesmo código gera ambientes isolados.
 
@@ -424,7 +452,9 @@ Um repositório no GitLab roda um pipeline de 3 etapas no seu Runner próprio, d
 
 **Requisito 7 — Subir o código para o seu projeto no GitLab**
 
-**7.1.** Suba **somente** o código deste trabalho (o módulo + o arquivo raiz + o `.gitlab-ci.yml`) para o **projeto que você criou na Parte 0** (passo 0.1). O pipeline vai rodar no **runner que você provisionou na Parte 0**, que já está online — igual ao [Módulo 03](../03-CICD/01-Primeiro-pipeline/README.md).
+**7.1. Suba só o código do trabalho para o projeto da Parte 0**
+
+Envie **somente** o módulo + o arquivo raiz + o `.gitlab-ci.yml` para o **projeto que você criou na Parte 0** (passo 0.1). O pipeline vai rodar no **runner que você provisionou na Parte 0**, que já está online — igual ao [Módulo 03](../03-CICD/01-Primeiro-pipeline/README.md).
 
 > [!IMPORTANT]
 > Confirme que o runner da Parte 0 está **online** em Settings → CI/CD → Runners. Como ele roda numa EC2 com o `LabRole`, o `terraform` no pipeline já tem acesso à AWS — sem `AWS_ACCESS_KEY_ID`/`SECRET` no repositório. Isso também evita o problema das credenciais do Academy, que são temporárias e expiram.
@@ -438,7 +468,9 @@ Um repositório no GitLab roda um pipeline de 3 etapas no seu Runner próprio, d
 
 **Requisito 8 — Escrever o pipeline de 3 etapas**
 
-**8.1.** Crie o arquivo `.gitlab-ci.yml` na raiz do projeto, com **3 stages** que rodam no seu runner próprio (Parte 0) e provisionam **um** ambiente (o do workspace escolhido — no exemplo, `prod`):
+**8.1. Crie o arquivo `.gitlab-ci.yml` na raiz do projeto**
+
+Ele terá **3 stages** que rodam no seu runner próprio (Parte 0) e provisionam **um** ambiente (o do workspace escolhido — no exemplo, `prod`):
 
 - **validar** — `terraform fmt -check`, `terraform init`, `terraform validate`;
 - **revisar/gate** — seleciona o workspace, gera o `terraform plan` (artefato para o próximo stage) e roda o **Checkov** (igual ao Lab 03.2), publicando o relatório **JUnit** na aba **Tests**;
@@ -583,7 +615,9 @@ Você **não desenvolve nada de CI/CD além do `.gitlab-ci.yml`**, mas precisa *
 
 Suas coisas ficam em **dois lugares**: o **código** está no Codespaces (nuvem); os **prints** são `.png` na **sua máquina** (você os salvou com print de tela). Por isso:
 
-**9.1 — no Codespaces:** empacote só o código, sem os artefatos pesados/locais (`.terraform/`, state, `build/`, `plan.tfplan`):
+**9.1. No Codespaces, empacote só o código**
+
+Sem os artefatos pesados/locais (`.terraform/`, state, `build/`, `plan.tfplan`):
 
 ```bash
 cd /workspaces/FIAP-Platform-Engineering/Trabalho-final
@@ -594,11 +628,15 @@ zip -r trabalho-final-<SEU-RM>.zip . \
 
 No painel de arquivos do Codespaces, clique com o botão direito em `trabalho-final-<SEU-RM>.zip` → **Download**.
 
-**9.2 — na sua máquina:** descompacte o zip baixado, crie uma pasta `prints/` dentro dele, mova para lá os **3 prints** e recompacte. O `trabalho-final-<SEU-RM>.zip` final (código + `prints/`) é o que você entrega.
+**9.2. Na sua máquina, junte os prints e recompacte**
+
+Descompacte o zip baixado, crie uma pasta `prints/` dentro dele, mova para lá os **3 prints** e recompacte. O `trabalho-final-<SEU-RM>.zip` final (código + `prints/`) é o que você entrega.
 
 #### Submissão
 
-**9.3.** Envie no canal indicado pelo professor (portal da FIAP / comunicado da turma), com:
+**9.3. Envie no canal indicado pelo professor**
+
+(Portal da FIAP / comunicado da turma), com:
 
 - [ ] `trabalho-final-<SEU-RM>.zip` (código + `.gitlab-ci.yml` + `prints/`)
 - [ ] **Link do repositório GitLab** (cole no campo de texto da entrega)

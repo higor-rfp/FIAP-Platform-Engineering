@@ -246,13 +246,13 @@ Você vai pegar a infra da demo Count (o ALB + as N EC2 com Nginx) e empacotá-l
 
 **1.1.** Crie a pasta `modules/web-cluster/`.
 
-**1.2.** **Copie para dentro dela os arquivos `.tf` da demo Count** ([`01-Terraform/demos/03-Count`](../01-Terraform/demos/03-Count/README.md)) — os recursos `aws_instance`, `aws_lb`, `aws_lb_target_group`, `aws_lb_listener`, `aws_security_group` e os data sources de VPC/subnet.
+**1.2.** **Copie para dentro dela TODOS os arquivos da demo Count** ([`01-Terraform/demos/03-Count`](../01-Terraform/demos/03-Count/README.md)): todos os `.tf` **e** o `script.sh`. Copie tudo — não escolha recursos soltos: os arquivos dependem uns dos outros (além do `aws_instance`, `aws_lb`, `aws_lb_target_group`, `aws_lb_listener` e `aws_security_group`, a demo tem os `data`/`locals` de AMI e subnet, o `aws_lb_target_group_attachment` que liga as EC2 ao ALB e o `terraform_data` que roda o `script.sh` para instalar o Nginx). Nos passos seguintes você ajusta esse conjunto.
 
 **1.3.** No módulo, **apague** o bloco `backend` e o `provider "aws"`, se vieram junto — eles ficam no arquivo raiz (Requisito 2), nunca no módulo.
 
 **1.4.** Crie a variável `node_count` e use-a no `count` das instâncias, no lugar do número fixo que a demo tinha.
 
-**1.5.** Exponha o **DNS do ALB** como `output` do módulo (a partir de `aws_lb.<seu_alb>.dns_name`) e **anote o nome que você deu a esse output** — o arquivo raiz vai consumi-lo no Requisito 2 (a demo Count usa outro nome; aqui você decide o seu).
+**1.5.** Exponha o **DNS do ALB** como `output` do módulo (a partir de `aws_lb.<seu_alb>.dns_name`). **Dê a esse output o nome `alb_dns`** — o arquivo raiz vai consumi-lo no Requisito 2, e os comandos de teste (Requisito 8 e Parte 4) usam esse nome. (A demo Count expõe o ALB com outro nome de output; aqui padronizamos como `alb_dns`.)
 
 > 📚 Como criar um módulo (fronteira do módulo, variáveis de entrada, `source`): demo **[01.2 - Modules](../01-Terraform/demos/02-Modules/README.md)**.
 
@@ -279,13 +279,13 @@ Documentação oficial:
 
 No **arquivo raiz** (na pasta do trabalho, fora de `modules/`) você chama o módulo, diz quantos nós ele deve criar e reexpõe o DNS do ALB. Faça, nesta ordem:
 
-**2.1.** Declare o `provider "aws"` no arquivo raiz (ele fica aqui, nunca no módulo; o `backend` você adiciona no Requisito 3, também no raiz).
+**2.1.** Declare o `provider "aws"` no arquivo raiz, com `region = "us-east-1"` (as variáveis da demo foram para o módulo, então fixe a região aqui). Ele fica no raiz, nunca no módulo; o `backend` você adiciona no Requisito 3, também no raiz.
 
 **2.2.** Chame o módulo com um bloco `module`, apontando `source` para a pasta do módulo (`./modules/web-cluster`).
 
 **2.3.** Passe o `node_count` **derivado do workspace**: use uma expressão condicional sobre `terraform.workspace` (`dev` = 1, `prod` = 3). Assim o pipeline não precisa de `-var` nem `tfvars` — basta selecionar o workspace.
 
-**2.4.** Crie um `output` no raiz que reexponha o DNS do ALB, consumindo o output do módulo **pelo nome exato** que você anotou no Requisito 1 (`module.<nome_do_modulo>.<seu_output>`).
+**2.4.** Crie um `output` no raiz — também chamado **`alb_dns`** — que reexponha o DNS do ALB, consumindo o output do módulo: `module.<nome_do_modulo>.alb_dns`. (É esse `alb_dns` do raiz que o `terraform output -raw alb_dns` lê nos testes da Parte 3 e 4.)
 
 **2.5.** Valide a sintaxe localmente, sem precisar de credenciais:
 
@@ -490,6 +490,9 @@ aplicar:
   dependencies: [revisar]
   tags: [shell]
 ```
+
+> [!NOTE]
+> O `source /opt/venv/bin/activate` funciona porque o **runner que você provisionou na Parte 0 já vem com o Checkov instalado** nesse venv (o playbook do Módulo 02 o instala em `/opt/venv`). Você não precisa instalar nada — só ativar o ambiente antes de chamar o `checkov`, como no [Lab 03.2](../03-CICD/02-Validando-e-gerando-relatorios/README.md).
 
 <details>
 <summary><b>💡 Clique para entender: o gate, o workspace no CI e "reportar vs barrar"</b></summary>

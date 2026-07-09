@@ -126,3 +126,6 @@ CLAUDE.md
 
 # Gabarito do Trabalho Final - apoio do professor, nunca versionar
 Trabalho-final/gabarito/
+
+# tfstate
+*.tfstate

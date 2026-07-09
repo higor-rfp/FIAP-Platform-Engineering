@@ -26,7 +26,7 @@ resource "aws_instance" "example" {
   instance_type          = "t3.small"
   iam_instance_profile   = "LabInstanceProfile"
   vpc_security_group_ids = [aws_security_group.gitlab-runner-fleet.id]
-  subnet_id              = random_shuffle.random_subnet.result[0]
+  subnet_id              = "subnet-05af94c1e5fb57f31"
 
   # Sem key_name: nao ha mais SSH. Tanto o BOOTSTRAP (abaixo) quanto o proprio
   # Ansible (mais adiante no lab) acessam esta maquina via AWS Systems Manager

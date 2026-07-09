@@ -260,9 +260,9 @@ Remova o bloco `backend` e o `provider "aws"`, se vieram junto — eles ficam no
 
 Crie a variável `node_count` e use-a no `count` das instâncias, no lugar do número fixo que a demo tinha.
 
-**1.5. Exponha o DNS do ALB como um `output`**
+**1.5. Exponha o DNS do ALB como um `output` do módulo**
 
-A partir de `aws_lb.<seu_alb>.dns_name`. **Dê a esse output o nome `alb_dns`** — o arquivo raiz vai consumi-lo no Requisito 2, e os comandos de teste (Requisito 8 e Parte 4) usam esse nome. (A demo Count usa outro nome; aqui padronizamos como `alb_dns`.)
+No arquivo **`outputs.tf` do módulo** (ele já veio da demo Count no passo 1.2 — é só editá-lo), declare um `output` que devolve `aws_lb.<seu_alb>.dns_name`. **Dê a ele o nome `alb_dns`** — o arquivo raiz vai consumi-lo no Requisito 2, e os comandos de teste (Requisito 8 e Parte 4) usam esse nome. (A demo Count expõe o ALB com outro nome de output; aqui padronizamos como `alb_dns`.)
 
 > 📚 Como criar um módulo (fronteira do módulo, variáveis de entrada, `source`): demo **[01.2 - Modules](../01-Terraform/demos/02-Modules/README.md)**.
 
@@ -303,7 +303,7 @@ Use uma expressão condicional sobre `terraform.workspace` (`dev` = 1, `prod` = 
 
 **2.4. Reexponha o DNS do ALB como `output` do raiz**
 
-Chame-o também de **`alb_dns`** e consuma o output do módulo: `module.<nome_do_modulo>.alb_dns`. É esse `alb_dns` do raiz que o `terraform output -raw alb_dns` lê nos testes da Parte 3 e 4.
+Num arquivo **`outputs.tf` na raiz do projeto** (fora de `modules/`), crie um `output` — também chamado **`alb_dns`** — que devolve o output do módulo: `module.<nome_do_modulo>.alb_dns`. É esse `alb_dns` do raiz que o `terraform output -raw alb_dns` lê nos testes da Parte 3 e 4.
 
 **2.5. Valide a sintaxe localmente** (sem precisar de credenciais):
 
@@ -450,25 +450,9 @@ Um repositório no GitLab roda um pipeline de 3 etapas no seu Runner próprio, d
 
 <a id="req-7"></a>
 
-**Requisito 7 — Subir o código para o seu projeto no GitLab**
+**Requisito 7 — Escrever o pipeline de 3 etapas**
 
-**7.1. Suba só o código do trabalho para o projeto da Parte 0**
-
-Envie **somente** o módulo + o arquivo raiz + o `.gitlab-ci.yml` para o **projeto que você criou na Parte 0** (passo 0.1). O pipeline vai rodar no **runner que você provisionou na Parte 0**, que já está online — igual ao [Módulo 03](../03-CICD/01-Primeiro-pipeline/README.md).
-
-> [!IMPORTANT]
-> Confirme que o runner da Parte 0 está **online** em Settings → CI/CD → Runners. Como ele roda numa EC2 com o `LabRole`, o `terraform` no pipeline já tem acesso à AWS — sem `AWS_ACCESS_KEY_ID`/`SECRET` no repositório. Isso também evita o problema das credenciais do Academy, que são temporárias e expiram.
-
-> [!CAUTION]
-> **Nunca** faça commit do `terraform.tfstate` nem de segredos. Confira o `.gitignore` antes do primeiro push.
-
----
-
-<a id="req-8"></a>
-
-**Requisito 8 — Escrever o pipeline de 3 etapas**
-
-**8.1. Crie o arquivo `.gitlab-ci.yml` na raiz do projeto**
+**7.1. Crie o arquivo `.gitlab-ci.yml` na raiz do projeto**
 
 Ele terá **3 stages** que rodam no seu runner próprio (Parte 0) e provisionam **um** ambiente (o do workspace escolhido — no exemplo, `prod`):
 
@@ -543,11 +527,27 @@ Documentação oficial:
 </blockquote>
 </details>
 
+---
+
+<a id="req-8"></a>
+
+**Requisito 8 — Subir o código e disparar o pipeline**
+
+**8.1. Suba só o código do trabalho para o projeto da Parte 0**
+
+Envie **somente** o módulo + o arquivo raiz + o `.gitlab-ci.yml` (que você escreveu no Requisito 7) para o **projeto que você criou na Parte 0** (passo 0.1). O `push` na branch principal **dispara o pipeline** automaticamente, no **runner que você provisionou na Parte 0** — igual ao [Módulo 03](../03-CICD/01-Primeiro-pipeline/README.md).
+
+> [!IMPORTANT]
+> Confirme que o runner da Parte 0 está **online** em Settings → CI/CD → Runners. Como ele roda numa EC2 com o `LabRole`, o `terraform` no pipeline já tem acesso à AWS — sem `AWS_ACCESS_KEY_ID`/`SECRET` no repositório. Isso também evita o problema das credenciais do Academy, que são temporárias e expiram.
+
+> [!CAUTION]
+> **Nunca** faça commit do `terraform.tfstate` nem de segredos. Confira o `.gitignore` antes do primeiro push.
+
 <details>
 <summary><b>⚠ Se der erro: pipeline fica em <code>pending</code> e nunca roda</b></summary>
 <blockquote>
 
-O job está esperando um Runner. Verifique em **Settings → CI/CD → Runners** se o Runner do Módulo 02 está **online** e habilitado para este projeto. Se ele tiver tags, o job precisa ter as mesmas tags (ou desmarque "Run untagged jobs").
+O job está esperando um Runner. Verifique em **Settings → CI/CD → Runners** se o **runner da Parte 0** está **online** e habilitado para este projeto. Se ele tiver tags, o job precisa ter as mesmas tags (ou desmarque "Run untagged jobs").
 
 </blockquote>
 </details>
@@ -712,7 +712,7 @@ Se você chegou até aqui, então construiu — em um único projeto — a respo
 
 Antes de abrir issue/perguntar, colete estas 4 informações — elas reduzem o tempo de resposta em 10×:
 
-1. **Em que requisito você está** (ex: "Requisito 8, etapa `revisar` do pipeline")
+1. **Em que requisito você está** (ex: "Requisito 7, etapa `revisar` do pipeline")
 2. **Mensagem de erro literal** (copia-cola completo do log do job no GitLab, não screenshot — texto é pesquisável)
 3. **Saída de** `terraform workspace list` **e** `terraform validate` (mostra o estado real do projeto)
 4. **O que você já tentou**
